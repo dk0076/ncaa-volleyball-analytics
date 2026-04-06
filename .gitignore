@@ -1,1 +1,6 @@
 data/
+.RData
+.Rhistory
+outputs/
+shiny_app/
+*.Rproj.user
