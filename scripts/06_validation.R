@@ -83,6 +83,8 @@ tune_and_validate <- function(X_train, y_train, X_test, y_test, label) {
   # SHAP importance: mean(|SHAP|) per feature on test set.
   # More reliable than gain for high-cardinality features like receiver_id.
   shap_matrix <- predict(model, xgb.DMatrix(X_test), predcontrib = TRUE)
+  stopifnot("SHAP matrix last column is not BIAS" =
+              colnames(shap_matrix)[ncol(shap_matrix)] == "BIAS")
   shap_matrix <- shap_matrix[, -ncol(shap_matrix), drop = FALSE]  # drop bias column
   shap_imp    <- sort(colMeans(abs(shap_matrix)), decreasing = TRUE)
 
