@@ -137,22 +137,39 @@ serve_quality.rds          # Model predictions and scores (output of 04)
 
 ## Reproducing the Data
 
-`data/` is not tracked in git. To reproduce from scratch:
+`data/` is not tracked in git. To reproduce from scratch, open the project via
+`ncaa-volleyball-analytics.Rproj` (sets the working directory automatically), then:
 
-1. **Create `data/cal_poly_contests.rds`** — this is a one-time prerequisite for
-   `01_data_pull.R`. Generate it using `ncaavolleyballr` before running script 01:
-   ```r
-   library(ncaavolleyballr)
-   library(dplyr)
-   contests <- get_team_schedule(team = "Cal Poly", season = "2024") # adjust as needed
-   saveRDS(contests, "data/cal_poly_contests.rds")
-   ```
-   The data frame must have a `contest` column of contest IDs.
+**1. Create the data folder**
+```r
+dir.create("data", showWarnings = FALSE)
+```
 
-2. **Run scripts 01 → 06 in order.** Skip 01 if `data/volleyball.duckdb` already exists.
+**2. Create `data/cal_poly_contests.rds`** — one-time prerequisite for `01_data_pull.R`.
+Use `ncaavolleyballr` to fetch a schedule with contest IDs and save it:
+```r
+library(ncaavolleyballr)
+# See ncaavolleyballr docs for the correct schedule function and season format.
+# The saved data frame must have a column named `contest` containing contest IDs.
+contests <- <schedule_function>(...)
+saveRDS(contests, "data/cal_poly_contests.rds")
+```
 
-3. **Launch the app** with `shiny::runApp("shiny_app")` from the project root after
-   running script 04 (which writes `data/serve_quality.rds`).
+**3. Run scripts in order**
+```r
+source("scripts/01_data_pull.R")   # live API pull — ~5 sec per match, expect 15–20 min
+source("scripts/02_sql_explore.R")
+source("scripts/03_feature_engineering.R")
+source("scripts/04_model.R")
+source("scripts/05_prior_features.R")
+source("scripts/06_validation.R")
+```
+Skip script 01 if `data/volleyball.duckdb` already exists.
+
+**4. Launch the app**
+```r
+shiny::runApp("shiny_app")
+```
 
 ## Limitations and Future Work
 
