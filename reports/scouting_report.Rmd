@@ -21,7 +21,9 @@ library(xgboost)
 serves    <- readRDS("../data/serves_featured.rds")
 quality   <- readRDS("../data/serve_quality.rds")
 artifacts <- readRDS("../data/models.rds")
-val_metrics <- readRDS("../data/validation_metrics.rds")
+val_metrics <- if (file.exists("../data/validation_metrics.rds")) {
+  readRDS("../data/validation_metrics.rds")
+} else list(auc = "N/A")
 
 opponent  <- params$opponent
 cal_poly  <- "Cal Poly"
@@ -277,6 +279,6 @@ if (length(cp_servers) > 0 && length(opp_receivers) > 0 && nrow(top3) > 0) {
 
 \vspace{12pt}
 \footnotesize
-*Serve Quality = P(Ace) - P(Error) - P(FBK Against). All predictions based on historical
+*Serve Quality = P(Ace) - P(Error) - P(In Play) × P(FBK Against | In Play). All predictions based on historical
 player rates and XGBoost model trained on 2025 Big West season PBP data (AUC = `r val_metrics$auc`).
 Game state set to neutral (Set 2, tied score, away).*

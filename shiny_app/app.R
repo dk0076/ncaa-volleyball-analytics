@@ -32,7 +32,7 @@ ui <- fluidPage(
       sliderInput("min_serves", "Minimum Serves:",
                   min = 10, max = 100, value = 10),
       hr(),
-      p("Serve Quality = P(Ace) - P(Error) - P(FBK Against)"),
+      p("Serve Quality = P(Ace) - P(Error) - P(In Play) \u00d7 P(FBK Against | In Play)"),
       p("Higher = better serving performance.")
     ),
     

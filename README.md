@@ -64,7 +64,7 @@ server, or the receiver?**
 -   **P(Error)** — predicted probability the serve is an error
 -   **P(FBK)** — predicted probability of FBK against (in-play serves
     only)
--   **Serve Quality = P(Ace) - P(Error) - P(FBK Against)**
+-   **Serve Quality = P(Ace) - P(Error) - P(In Play) × P(FBK Against | In Play)**
 
 ### Scouting Report Metrics
 
@@ -95,7 +95,7 @@ P(FBK Against | In Play)  — opponent kills on first ball after reception
 ### Serve Quality Index
 
 ```         
-Serve Quality = P(Ace) - P(Error) - P(FBK Against)
+Serve Quality = P(Ace) - P(Error) - P(In Play) x P(FBK Against | In Play)
 ```
 
 Higher scores indicate more effective serving. All scores are negative
