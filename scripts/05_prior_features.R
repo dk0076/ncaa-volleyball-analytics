@@ -10,7 +10,10 @@ contest_order <- big_west_contests %>%
   pull(contest)
 
 serves <- serves %>%
-  mutate(contest_idx = match(contestid, contest_order))
+  mutate(contest_idx = match(as.character(contestid), as.character(contest_order)))
+
+stopifnot("contest_idx all NA — type mismatch between contestid and contest_order" =
+            !all(is.na(serves$contest_idx)))
 
 # ── Server prior ace / error rates (all serves) ───────────────────────────────
 player_contest_stats <- serves %>%

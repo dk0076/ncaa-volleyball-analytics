@@ -3,17 +3,17 @@ library(dplyr)
 library(ggplot2)
 library(ggrepel)
 
-in_play <- readRDS("../data/serve_quality.rds")
+serves <- readRDS("../data/serve_quality.rds")
 
-# Summarize for leaderboard
-leaderboard <- in_play %>%
+# Summarize for leaderboard — p_fbk averaged over in-play serves only (conditional rate)
+leaderboard <- serves %>%
   group_by(player, serve_team) %>%
   summarise(
     n_serves    = n(),
     avg_quality = round(mean(serve_quality), 3),
     avg_p_ace   = round(mean(p_ace), 3),
     avg_p_error = round(mean(p_error), 3),
-    avg_p_fbk   = round(mean(p_fbk), 3),
+    avg_p_fbk   = round(mean(p_fbk[in_play == 1]), 3),
     .groups = "drop"
   ) %>%
   filter(n_serves >= 10) %>%
