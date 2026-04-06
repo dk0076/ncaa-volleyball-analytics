@@ -2,7 +2,7 @@ library(ncaavolleyballr)
 library(dplyr)
 library(duckdb)
 
-# --- Get contest IDs for all Big West teams ---
+# --- Get contest IDs for Big West + expanded programs ---
 # Team names must match ncaavolleyballr exactly. Verify with find_team_id().
 big_west_teams <- c(
   "Cal Poly", "UC Santa Barbara", "UC San Diego", "UC Davis",
@@ -10,7 +10,18 @@ big_west_teams <- c(
   "UC Irvine", "Hawaii", "UC Riverside"
 )
 
-schedules <- lapply(big_west_teams, function(team) {
+# Former Pac-12 programs (now spread across ACC, Big Ten, Big 12)
+expanded_teams <- c(
+  "Stanford", "California", "Oregon St.",
+  "UCLA", "USC", "Washington", "Oregon",
+  "Arizona", "Arizona St.", "Utah", "Colorado",
+  # Other prominent West Coast programs
+  "BYU", "San Diego St.", "Pepperdine", "Loyola Marymount"
+)
+
+all_teams <- unique(c(big_west_teams, expanded_teams))
+
+schedules <- lapply(all_teams, function(team) {
   cat("Getting schedule for", team, "\n")
   tryCatch(
     find_team_id(team, 2025) |> find_team_contests(),

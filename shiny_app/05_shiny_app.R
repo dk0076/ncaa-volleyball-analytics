@@ -22,7 +22,7 @@ leaderboard <- in_play %>%
 teams <- sort(unique(leaderboard$serve_team))
 
 ui <- fluidPage(
-  titlePanel("NCAA Volleyball Serve Quality Index — Cal Poly 2024"),
+  titlePanel("NCAA Volleyball Serve Quality Index — Cal Poly 2025"),
   
   sidebarLayout(
     sidebarPanel(
