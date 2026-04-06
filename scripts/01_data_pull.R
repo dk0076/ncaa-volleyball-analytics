@@ -13,7 +13,7 @@ big_west_teams <- c(
 schedules <- lapply(big_west_teams, function(team) {
   cat("Getting schedule for", team, "\n")
   tryCatch(
-    find_team_id(team, 2024) |> find_team_contests(),
+    find_team_id(team, 2025) |> find_team_contests(),
     error = function(e) { cat("  ERROR:", conditionMessage(e), "\n"); NULL }
   )
 })

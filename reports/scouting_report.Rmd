@@ -1,0 +1,282 @@
+---
+title: "Serve Scouting Report"
+subtitle: "Cal Poly vs. `r params$opponent`"
+date: "`r format(Sys.Date(), '%B %d, %Y')`"
+output:
+  pdf_document:
+    latex_engine: xelatex
+    toc: false
+params:
+  opponent: "UC Santa Barbara"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE)
+library(dplyr)
+library(ggplot2)
+library(knitr)
+library(kableExtra)
+library(xgboost)
+
+serves    <- readRDS("../data/serves_featured.rds")
+quality   <- readRDS("../data/serve_quality.rds")
+artifacts <- readRDS("../data/models.rds")
+
+opponent  <- params$opponent
+cal_poly  <- "Cal Poly"
+
+# Cal Poly green
+cp_green <- "#154734"
+```
+
+```{r validate-opponent, include=FALSE}
+all_teams <- unique(c(serves$serve_team, serves$opp_team))
+if (!opponent %in% all_teams) {
+  stop(paste0("Opponent '", opponent, "' not found. Available teams:\n",
+              paste(sort(all_teams), collapse = ", ")))
+}
+```
+
+```{r latest-rates}
+# Most recent prior rates per player (from their last recorded contest)
+latest_server_rates <- serves %>%
+  arrange(contestid) %>%
+  group_by(player, serve_team) %>%
+  slice_tail(n = 1) %>%
+  ungroup() %>%
+  select(player, serve_team, prior_ace_rate, prior_error_rate,
+         prior_fbk_rate, match_ace_rate, match_error_rate)
+
+latest_receiver_rates <- serves %>%
+  filter(in_play == 1, !is.na(receiver)) %>%
+  arrange(contestid) %>%
+  group_by(receiver, opp_team) %>%
+  slice_tail(n = 1) %>%
+  ungroup() %>%
+  select(receiver, opp_team, receiver_prior_fbk_rate)
+
+latest_opp_rates <- serves %>%
+  filter(in_play == 1) %>%
+  arrange(contestid) %>%
+  group_by(opp_team) %>%
+  slice_tail(n = 1) %>%
+  ungroup() %>%
+  select(opp_team, opp_prior_fbk_rate)
+```
+
+---
+
+## Their Weakest Receivers — Serve Targets
+
+Players ranked by historical FBK concession rate (higher = weaker passer = better target).
+Minimum 30 receptions. Focus on the top of this list.
+
+```{r receiver-targets}
+receiver_targets <- serves %>%
+  filter(in_play == 1, serve_team == opponent | opp_team == opponent) %>%
+  filter(!is.na(receiver)) %>%
+  # Keep only opponent players receiving
+  filter(opp_team == opponent) %>%
+  group_by(receiver) %>%
+  summarise(
+    receptions    = n(),
+    fbk_against   = sum(fbk_against),
+    fbk_rate      = round(mean(fbk_against), 3),
+    .groups = "drop"
+  ) %>%
+  filter(receptions >= 30) %>%
+  arrange(desc(fbk_rate)) %>%
+  mutate(
+    Rank       = row_number(),
+    `FBK Rate` = fbk_rate,
+    Receptions = receptions,
+    Recommendation = case_when(
+      fbk_rate >= quantile(fbk_rate, 0.67) ~ "Primary Target",
+      fbk_rate >= quantile(fbk_rate, 0.33) ~ "Secondary Target",
+      TRUE                                  ~ "Avoid"
+    )
+  ) %>%
+  select(Rank, Player = receiver, Receptions, `FBK Rate`, Recommendation)
+
+kable(receiver_targets, booktabs = TRUE, linesep = "") %>%
+  kable_styling(font_size = 10, latex_options = "hold_position") %>%
+  row_spec(which(receiver_targets$Recommendation == "Primary Target"),
+           bold = TRUE, color = "white", background = cp_green) %>%
+  row_spec(which(receiver_targets$Recommendation == "Avoid"),
+           color = "gray")
+```
+
+\vspace{6pt}
+*FBK Rate = fraction of in-play serves received that resulted in a first-ball kill against the server.*
+
+---
+
+## Their Serving Threats — Who to Watch
+
+Cal Poly's defensive preparation. Opponent servers ranked by Serve Quality Index.
+Minimum 20 serves.
+
+```{r serving-threats}
+threats <- quality %>%
+  filter(serve_team == opponent) %>%
+  group_by(player, serve_team) %>%
+  summarise(
+    Serves   = n(),
+    Quality  = round(mean(serve_quality), 3),
+    `P(Ace)` = round(mean(p_ace), 3),
+    `P(Err)` = round(mean(p_error), 3),
+    `P(FBK)` = round(mean(p_fbk), 3),
+    .groups  = "drop"
+  ) %>%
+  filter(Serves >= 20) %>%
+  arrange(desc(Quality)) %>%
+  mutate(Rank = row_number()) %>%
+  select(Rank, Player = player, Serves, Quality, `P(Ace)`, `P(Err)`, `P(FBK)`)
+
+kable(threats, booktabs = TRUE, linesep = "") %>%
+  kable_styling(font_size = 10, latex_options = "hold_position") %>%
+  row_spec(1:min(3, nrow(threats)), bold = TRUE)
+```
+
+---
+
+## Cal Poly Serve Matchup
+
+Predicted serve quality for each Cal Poly server against each `r opponent` receiver.
+Higher = more favorable matchup for the server. Primary receiver targets highlighted.
+
+```{r matchup-matrix}
+# Cal Poly servers with enough volume
+cp_servers <- quality %>%
+  filter(serve_team == cal_poly) %>%
+  group_by(player) %>%
+  summarise(n = n(), .groups = "drop") %>%
+  filter(n >= 20) %>%
+  pull(player)
+
+# Opponent receivers with enough receptions
+opp_receivers <- serves %>%
+  filter(in_play == 1, opp_team == opponent, !is.na(receiver)) %>%
+  group_by(receiver) %>%
+  summarise(n = n(), .groups = "drop") %>%
+  filter(n >= 30) %>%
+  pull(receiver)
+
+if (length(cp_servers) == 0 || length(opp_receivers) == 0) {
+  cat("Not enough data to generate matchup matrix.")
+} else {
+  # Build all server × receiver combinations
+  matchups <- expand.grid(
+    player   = cp_servers,
+    receiver = opp_receivers,
+    stringsAsFactors = FALSE
+  )
+
+  # Attach latest prior rates
+  matchups <- matchups %>%
+    left_join(latest_server_rates %>% filter(serve_team == cal_poly),
+              by = "player") %>%
+    left_join(latest_receiver_rates %>% filter(opp_team == opponent),
+              by = "receiver") %>%
+    left_join(latest_opp_rates %>% filter(opp_team == opponent),
+              by = c("receiver" = "opp_team")) %>%
+    mutate(
+      opp_prior_fbk_rate = coalesce(
+        opp_prior_fbk_rate,
+        mean(serves$fbk_against[serves$in_play == 1], na.rm = TRUE)
+      ),
+      # Neutral game state
+      set_num     = 2L,
+      score_diff  = 0L,
+      is_home     = 0L,
+      is_late_set = 0L,
+      # Factor encoding using training levels
+      player_id   = as.integer(factor(player,   levels = artifacts$player_levels)),
+      receiver_id = as.integer(factor(receiver, levels = artifacts$receiver_levels)),
+      opp_team_id = as.integer(factor(opponent, levels = artifacts$opp_levels))
+    ) %>%
+    mutate(across(c(prior_ace_rate, prior_error_rate, prior_fbk_rate,
+                    receiver_prior_fbk_rate, opp_prior_fbk_rate,
+                    match_ace_rate, match_error_rate),
+                  ~replace(., is.na(.), mean(., na.rm = TRUE))))
+
+  features_fbk  <- artifacts$features_fbk
+  features_base <- artifacts$features_base
+
+  X_base <- as.matrix(matchups[, features_base])
+  X_fbk  <- as.matrix(matchups[, features_fbk])
+
+  matchups$p_ace   <- predict(artifacts$m1, xgb.DMatrix(X_base))
+  matchups$p_error <- predict(artifacts$m2, xgb.DMatrix(X_base))
+  matchups$p_fbk   <- predict(artifacts$m3, xgb.DMatrix(X_fbk))
+  matchups$quality <- round(matchups$p_ace - matchups$p_error - matchups$p_fbk, 3)
+
+  # Pivot to wide matrix
+  matrix_wide <- matchups %>%
+    select(Player = player, receiver, quality) %>%
+    tidyr::pivot_wider(names_from = receiver, values_from = quality)
+
+  # Highlight primary targets (top 33% receivers by FBK rate)
+  primary_targets <- receiver_targets %>%
+    filter(Recommendation == "Primary Target") %>%
+    pull(Player)
+
+  tbl <- kable(matrix_wide, booktabs = TRUE, linesep = "",
+               caption = "Predicted Serve Quality by Matchup") %>%
+    kable_styling(font_size = 9, latex_options = c("hold_position", "scale_down"))
+
+  for (col in intersect(primary_targets, colnames(matrix_wide)[-1])) {
+    tbl <- tbl %>%
+      column_spec(which(colnames(matrix_wide) == col),
+                  bold = TRUE, color = cp_green)
+  }
+  tbl
+}
+```
+
+---
+
+## Top Recommendations
+
+```{r recommendations}
+if (length(cp_servers) > 0 && length(opp_receivers) > 0) {
+  top3 <- matchups %>%
+    arrange(desc(quality)) %>%
+    slice_head(n = 3) %>%
+    mutate(
+      Rank = row_number(),
+      `Serve Quality` = quality,
+      `P(Ace)` = round(p_ace, 3),
+      `P(FBK)` = round(p_fbk, 3)
+    ) %>%
+    select(Rank,
+           `Cal Poly Server` = player,
+           `Target Receiver` = receiver,
+           `Serve Quality`,
+           `P(Ace)`,
+           `P(FBK)`)
+
+  kable(top3, booktabs = TRUE, linesep = "") %>%
+    kable_styling(font_size = 10, latex_options = "hold_position") %>%
+    row_spec(1, bold = TRUE, color = "white", background = cp_green)
+}
+```
+
+\vspace{6pt}
+
+```{r recommendation-text, results='asis'}
+if (length(cp_servers) > 0 && length(opp_receivers) > 0 && nrow(top3) > 0) {
+  best <- top3[1, ]
+  cat(paste0(
+    "**Primary recommendation:** ", best$`Cal Poly Server`,
+    " serving to ", best$`Target Receiver`,
+    " (predicted quality: ", best$`Serve Quality`, ", P(FBK) = ", best$`P(FBK)`, ")."
+  ))
+}
+```
+
+\vspace{12pt}
+\footnotesize
+*Serve Quality = P(Ace) - P(Error) - P(FBK Against). All predictions based on historical
+player rates and XGBoost model trained on 2024 Big West season PBP data (AUC = 0.630).
+Game state set to neutral (Set 2, tied score, away).*
