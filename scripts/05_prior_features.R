@@ -1,27 +1,17 @@
 library(dplyr)
-library(duckdb)
 
-serves <- readRDS("data/serves_clean.rds")
+serves         <- readRDS("data/serves_clean.rds")
+bwc_contests   <- readRDS("data/big_west_contests.rds")
 
-# Derive contest order from PBP directly — covers all contests including
-# expanded-team non-conference games that aren't in big_west_contests.rds
-con <- dbConnect(duckdb(), dbdir = "data/volleyball.duckdb", read_only = TRUE)
-contest_dates <- dbGetQuery(con, "
-  SELECT DISTINCT contestid, MIN(date) as date
-  FROM pbp
-  GROUP BY contestid
-")
-dbDisconnect(con)
-
-contest_order <- contest_dates %>%
-  mutate(date_parsed = as.Date(date)) %>%
+contest_order <- bwc_contests %>%
+  mutate(date_parsed = as.Date(date, "%m/%d/%Y")) %>%
   arrange(date_parsed) %>%
-  pull(contestid)
+  pull(contest)
 
 serves <- serves %>%
   mutate(contest_idx = match(as.character(contestid), as.character(contest_order)))
 
-stopifnot("contest_idx all NA — type mismatch between contestid and contest_order" =
+stopifnot("contest_idx all NA — contestid type mismatch with big_west_contests.rds" =
             !all(is.na(serves$contest_idx)))
 
 # ── Server prior ace / error rates (all serves) ───────────────────────────────

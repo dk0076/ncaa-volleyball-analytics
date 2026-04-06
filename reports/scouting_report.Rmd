@@ -75,18 +75,27 @@ Players ranked by historical FBK concession rate (lower = weaker passer = better
 Minimum 20 receptions. Focus on the top of this list.
 
 ```{r receiver-targets}
+use_model_rates <- isTRUE(val_metrics$auc_m3 >= 0.55)
+
 receiver_targets <- serves %>%
-  filter(in_play == 1, serve_team == opponent | opp_team == opponent) %>%
-  filter(!is.na(receiver)) %>%
-  # Keep only opponent players receiving
-  filter(opp_team == opponent) %>%
+  filter(in_play == 1, opp_team == opponent, !is.na(receiver)) %>%
   group_by(receiver) %>%
   summarise(
-    receptions = n(),
-    fbk_rate   = round(mean(fbk_against), 3),
-    .groups    = "drop"
+    receptions   = n(),
+    raw_fbk_rate = mean(fbk_against),
+    .groups      = "drop"
   ) %>%
   filter(receptions >= 20) %>%
+  left_join(
+    latest_receiver_rates %>% select(receiver, receiver_prior_fbk_rate),
+    by = "receiver"
+  ) %>%
+  mutate(
+    fbk_rate = round(
+      if (use_model_rates) coalesce(receiver_prior_fbk_rate, raw_fbk_rate) else raw_fbk_rate,
+      3
+    )
+  ) %>%
   arrange(fbk_rate) %>%
   mutate(
     Rank           = row_number(),
@@ -107,7 +116,7 @@ kable(receiver_targets, booktabs = TRUE, linesep = "") %>%
 ```
 
 \vspace{6pt}
-*FBK Rate = fraction of in-play serves received that resulted in a first-ball kill against the serving team. Lower = weaker passer.*
+*FBK Rate = `r if (use_model_rates) "model-adjusted prior rate (receiver_prior_fbk_rate)" else "raw historical rate"`. Lower = weaker passer.*
 
 ---
 

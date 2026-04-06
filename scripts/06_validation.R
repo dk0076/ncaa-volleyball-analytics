@@ -30,17 +30,10 @@ train <- serves_featured %>% filter(contestid %in% train_contests)
 test  <- serves_featured %>% filter(contestid %in% test_contests)
 cat("Train:", nrow(train), "| Test:", nrow(test), "\n")
 
-features_fbk <- model_artifacts$features_fbk
+features_base <- model_artifacts$features_base
+features_fbk  <- model_artifacts$features_fbk
 
-train_ip <- train %>% filter(in_play == 1)
-test_ip  <- test  %>% filter(in_play == 1)
-
-X_train <- as.matrix(train_ip[, features_fbk])
-X_test  <- as.matrix(test_ip[,  features_fbk])
-y_train <- train_ip$fbk_against
-y_test  <- test_ip$fbk_against
-
-# ── CV tuning on training set ─────────────────────────────────────────────────
+# ── XGBoost hyperparameters ───────────────────────────────────────────────────
 params <- list(
   objective        = "binary:logistic",
   eval_metric      = "logloss",
@@ -50,56 +43,95 @@ params <- list(
   colsample_bytree = 0.8
 )
 
-cv <- xgb.cv(
-  params                = params,
-  data                  = xgb.DMatrix(X_train, label = y_train),
-  nrounds               = 500,
-  nfold                 = 5,
-  early_stopping_rounds = 20,
-  verbose               = 0
-)
-
-best_rounds <- if (length(cv$best_iteration) > 0) {
-  cv$best_iteration
-} else {
-  which.min(cv$evaluation_log$test_logloss_mean)
-}
-
-m3_val <- xgb.train(
-  params  = params,
-  data    = xgb.DMatrix(X_train, label = y_train),
-  nrounds = best_rounds,
-  verbose = 0
-)
-
-preds <- predict(m3_val, xgb.DMatrix(X_test))
-
 logloss <- function(actual, predicted, eps = 1e-15) {
   predicted <- pmax(pmin(predicted, 1 - eps), eps)
   -mean(actual * log(predicted) + (1 - actual) * log(1 - predicted))
 }
 
-baseline_ll <- logloss(y_test, rep(mean(y_train), length(y_test)))
-model_ll    <- logloss(y_test, preds)
-roc_obj     <- pROC::roc(y_test, preds, quiet = TRUE)
+tune_and_validate <- function(X_train, y_train, X_test, y_test, label) {
+  cv <- xgb.cv(
+    params                = params,
+    data                  = xgb.DMatrix(X_train, label = y_train),
+    nrounds               = 500,
+    nfold                 = 5,
+    early_stopping_rounds = 20,
+    verbose               = 0
+  )
+  best_rounds <- if (length(cv$best_iteration) > 0) {
+    cv$best_iteration
+  } else {
+    which.min(cv$evaluation_log$test_logloss_mean)
+  }
 
-auc_val <- round(as.numeric(pROC::auc(roc_obj)), 4)
+  model <- xgb.train(
+    params  = params,
+    data    = xgb.DMatrix(X_train, label = y_train),
+    nrounds = best_rounds,
+    verbose = 0
+  )
 
-cat("\n--- Validation: P(FBK Against) ---\n")
-cat("Baseline logloss:", round(baseline_ll, 4), "\n")
-cat("Model logloss:   ", round(model_ll,    4), "\n")
-cat("Improvement:     ", round(baseline_ll - model_ll, 4), "\n")
-cat("AUC:             ", auc_val, "\n")
+  preds       <- predict(model, xgb.DMatrix(X_test))
+  baseline_ll <- logloss(y_test, rep(mean(y_train), length(y_test)))
+  model_ll    <- logloss(y_test, preds)
+  auc_val     <- round(as.numeric(pROC::auc(pROC::roc(y_test, preds, quiet = TRUE))), 4)
 
-cat("\nTop features:\n")
-print(xgb.importance(model = m3_val))
+  cat("\n--- Validation:", label, "---\n")
+  cat("Baseline logloss:", round(baseline_ll, 4), "\n")
+  cat("Model logloss:   ", round(model_ll,    4), "\n")
+  cat("Improvement:     ", round(baseline_ll - model_ll, 4), "\n")
+  cat("AUC:             ", auc_val, "\n")
+  cat("Top features:\n")
+  print(xgb.importance(model = model))
+
+  list(baseline_ll = round(baseline_ll, 4),
+       model_ll    = round(model_ll, 4),
+       improvement = round(baseline_ll - model_ll, 4),
+       auc         = auc_val)
+}
+
+# ── M1: P(Ace) ────────────────────────────────────────────────────────────────
+cat("Tuning M1 (Ace)...\n")
+m1_val <- tune_and_validate(
+  X_train = as.matrix(train[, features_base]),
+  y_train = train$ace,
+  X_test  = as.matrix(test[, features_base]),
+  y_test  = test$ace,
+  label   = "P(Ace) — M1"
+)
+
+# ── M2: P(Service Error) ─────────────────────────────────────────────────────
+cat("Tuning M2 (Service Error)...\n")
+m2_val <- tune_and_validate(
+  X_train = as.matrix(train[, features_base]),
+  y_train = train$service_error,
+  X_test  = as.matrix(test[, features_base]),
+  y_test  = test$service_error,
+  label   = "P(Service Error) — M2"
+)
+
+# ── M3: P(FBK | In Play) ─────────────────────────────────────────────────────
+cat("Tuning M3 (FBK)...\n")
+train_ip <- train %>% filter(in_play == 1)
+test_ip  <- test  %>% filter(in_play == 1)
+
+m3_val <- tune_and_validate(
+  X_train = as.matrix(train_ip[, features_fbk]),
+  y_train = train_ip$fbk_against,
+  X_test  = as.matrix(test_ip[, features_fbk]),
+  y_test  = test_ip$fbk_against,
+  label   = "P(FBK Against | In Play) — M3"
+)
 
 saveRDS(
   list(
-    baseline_logloss = round(baseline_ll, 4),
-    model_logloss    = round(model_ll,    4),
-    improvement      = round(baseline_ll - model_ll, 4),
-    auc              = auc_val,
+    # M3 AUC kept as `auc` for backwards compatibility with scouting report footnote
+    auc              = m3_val$auc,
+    auc_m1           = m1_val$auc,
+    auc_m2           = m2_val$auc,
+    auc_m3           = m3_val$auc,
+    baseline_logloss = m3_val$baseline_ll,
+    model_logloss    = m3_val$model_ll,
+    improvement      = m3_val$improvement,
     n_train          = nrow(train),
     n_test           = nrow(test)
   ),

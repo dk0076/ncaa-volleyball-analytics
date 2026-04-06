@@ -1,6 +1,9 @@
 library(xgboost)
 library(dplyr)
 
+stopifnot("Run 05_prior_features.R before this script" =
+            file.exists("data/serves_featured.rds"))
+
 serves <- readRDS("data/serves_featured.rds")
 
 # Factor encoding — build levels from full dataset so 06_validation.R stays consistent

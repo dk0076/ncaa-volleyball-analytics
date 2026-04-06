@@ -31,12 +31,15 @@ serves <- pbp %>%
     in_play        = as.integer(event == "Serve"),
     fbk_against    = as.integer(!is.na(fbk_team) & fbk_team != team),
     set_num        = as.integer(set),
-    score_server   = suppressWarnings(as.integer(trimws(sub("-.*", "", score)))),
-    score_receiver = suppressWarnings(as.integer(trimws(sub(".*-", "", score)))),
-    score_diff     = score_server - score_receiver,
+    # Score string is always away-home (e.g. "2-3" = away 2, home 3)
+    score_away     = suppressWarnings(as.integer(trimws(sub("-.*", "", score)))),
+    score_home     = suppressWarnings(as.integer(trimws(sub(".*-", "", score)))),
+    score_diff     = ifelse(team == home_team,
+                            score_home - score_away,   # home server: positive = winning
+                            score_away - score_home),  # away server: positive = winning
     is_home        = as.integer(team == home_team),
     is_late_set    = as.integer(
-      pmax(score_server, score_receiver, na.rm = TRUE) >=
+      pmax(score_away, score_home, na.rm = TRUE) >=
         ifelse(as.integer(set) == 5, 12, 20)
     ),
     opp_team       = ifelse(team == home_team, away_team, home_team)
