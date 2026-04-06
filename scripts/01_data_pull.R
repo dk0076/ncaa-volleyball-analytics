@@ -49,7 +49,12 @@ for (i in seq_len(nrow(all_contests_df))) {
     cat("  ERROR:", conditionMessage(e), "\n")
     NULL
   })
-  pbp_list[[i]] <- result
+  pbp_list[[as.character(contest_id)]] <- result
+
+  if (i %% 25 == 0) {
+    saveRDS(pbp_list, "data/pbp_checkpoint.rds")
+    cat("  Checkpoint saved at contest", i, "\n")
+  }
 }
 
 pbp_list <- Filter(Negate(is.null), pbp_list)

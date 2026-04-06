@@ -20,7 +20,7 @@ server, or the receiver?**
 
 -   **Source:** NCAA stats website via the `ncaavolleyballr` R package
 -   **Scope:** All matches involving Big West Conference women's
-    volleyball teams, 2024 season
+    volleyball teams, 2025 season
 -   **Volume:** 225 matches, 44,034 serves, 257,265 play-by-play events
 -   **Storage:** DuckDB local analytical database
 

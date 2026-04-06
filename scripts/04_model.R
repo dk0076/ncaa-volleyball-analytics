@@ -30,6 +30,7 @@ features_fbk <- c(
   "receiver_prior_fbk_rate", "opp_prior_fbk_rate"
 )
 
+serves$row_id <- seq_len(nrow(serves))
 in_play <- serves %>% filter(in_play == 1)
 
 X_all <- as.matrix(serves[,  features_base])
@@ -77,15 +78,22 @@ m3 <- xgb.train(params = params, data = xgb.DMatrix(X_fbk, label = in_play$fbk_a
 
 serves$p_ace   <- predict(m1, xgb.DMatrix(X_all))
 serves$p_error <- predict(m2, xgb.DMatrix(X_all))
+serves$p_in_play <- 1 - serves$p_ace - serves$p_error
 
+# Predict P(FBK | In Play) on in-play subset, then join back to full serves
+# row_id was added before filtering so we can rejoin correctly
 in_play <- serves %>% filter(in_play == 1)
 in_play$p_fbk <- predict(m3, xgb.DMatrix(as.matrix(in_play[, features_fbk])))
 
-in_play <- in_play %>%
-  mutate(serve_quality = p_ace - p_error - p_fbk)
+serves <- serves %>%
+  left_join(in_play %>% select(row_id, p_fbk), by = "row_id") %>%
+  mutate(
+    p_fbk         = ifelse(is.na(p_fbk), 0, p_fbk),
+    serve_quality = p_ace - p_error - p_in_play * p_fbk
+  )
 
 # ── Leaderboard ───────────────────────────────────────────────────────────────
-leaderboard <- in_play %>%
+leaderboard <- serves %>%
   group_by(player, serve_team) %>%
   summarise(
     n_serves    = n(),
@@ -111,5 +119,5 @@ saveRDS(
   ),
   "data/models.rds"
 )
-saveRDS(in_play, "data/serve_quality.rds")
+saveRDS(serves, "data/serve_quality.rds")
 cat("\nDone. Models saved.\n")
