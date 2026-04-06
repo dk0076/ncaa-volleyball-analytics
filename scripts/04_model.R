@@ -1,36 +1,90 @@
 library(xgboost)
 library(dplyr)
 
-serves <- readRDS("data/serves_clean.rds")
+serves <- readRDS("data/serves_featured.rds")
+
+# Factor encoding — build levels from full dataset so 06_validation.R stays consistent
+player_levels   <- levels(factor(serves$player))
+receiver_levels <- levels(factor(serves$receiver))
+opp_levels      <- levels(factor(serves$opp_team))
 
 serves <- serves %>%
   mutate(
-    serve_team_id = as.integer(factor(serve_team)),
-    player_id     = as.integer(factor(player))
+    player_id   = as.integer(factor(player,   levels = player_levels)),
+    receiver_id = as.integer(factor(receiver, levels = receiver_levels)),
+    opp_team_id = as.integer(factor(opp_team, levels = opp_levels))
   )
 
-features <- c("serve_team_id", "player_id", "set_num", "score_diff")
-X_all <- as.matrix(serves[, features])
+# Features for ace/error models (all serves — receiver may be NA for aces/errors)
+features_base <- c(
+  "player_id", "opp_team_id", "set_num", "score_diff",
+  "is_home", "is_late_set",
+  "prior_ace_rate", "prior_error_rate",
+  "match_ace_rate", "match_error_rate"
+)
 
-# MODEL 1: P(Ace)
-m1 <- xgboost(x = X_all, y = factor(serves$ace), nrounds = 100, eval_metric = "logloss")
-serves$p_ace <- predict(m1, X_all)
+# Features for FBK model (in-play serves only — receiver always present)
+features_fbk <- c(
+  features_base,
+  "receiver_id", "prior_fbk_rate",
+  "receiver_prior_fbk_rate", "opp_prior_fbk_rate"
+)
 
-# MODEL 2: P(Service Error)
-m2 <- xgboost(x = X_all, y = factor(serves$service_error), nrounds = 100, eval_metric = "logloss")
-serves$p_error <- predict(m2, X_all)
-
-# MODEL 3: P(FBK Against | In Play)
 in_play <- serves %>% filter(in_play == 1)
-X_fbk   <- as.matrix(in_play[, features])
-m3 <- xgboost(x = X_fbk, y = factor(in_play$fbk_against), nrounds = 100, eval_metric = "logloss")
-in_play$p_fbk <- predict(m3, X_fbk)
 
-# SERVE QUALITY INDEX
+X_all <- as.matrix(serves[,  features_base])
+X_fbk <- as.matrix(in_play[, features_fbk])
+
+# ── XGBoost hyperparameters ───────────────────────────────────────────────────
+params <- list(
+  objective        = "binary:logistic",
+  eval_metric      = "logloss",
+  eta              = 0.05,
+  max_depth        = 4,
+  subsample        = 0.8,
+  colsample_bytree = 0.8
+)
+
+# 5-fold CV with early stopping to find optimal rounds
+tune_rounds <- function(X, y) {
+  cv <- xgb.cv(
+    params                = params,
+    data                  = xgb.DMatrix(X, label = y),
+    nrounds               = 500,
+    nfold                 = 5,
+    early_stopping_rounds = 20,
+    verbose               = 0
+  )
+  if (length(cv$best_iteration) > 0) {
+    cv$best_iteration
+  } else {
+    which.min(cv$evaluation_log$test_logloss_mean)
+  }
+}
+
+cat("Tuning M1 (Ace)...\n")
+nr1 <- tune_rounds(X_all, serves$ace)
+cat("Tuning M2 (Error)...\n")
+nr2 <- tune_rounds(X_all, serves$service_error)
+cat("Tuning M3 (FBK)...\n")
+nr3 <- tune_rounds(X_fbk, in_play$fbk_against)
+cat("Best rounds — M1:", nr1, "| M2:", nr2, "| M3:", nr3, "\n")
+
+# ── Train final models ────────────────────────────────────────────────────────
+m1 <- xgb.train(params = params, data = xgb.DMatrix(X_all, label = serves$ace),           nrounds = nr1, verbose = 0)
+m2 <- xgb.train(params = params, data = xgb.DMatrix(X_all, label = serves$service_error), nrounds = nr2, verbose = 0)
+m3 <- xgb.train(params = params, data = xgb.DMatrix(X_fbk, label = in_play$fbk_against),  nrounds = nr3, verbose = 0)
+
+serves$p_ace   <- predict(m1, xgb.DMatrix(X_all))
+serves$p_error <- predict(m2, xgb.DMatrix(X_all))
+
+in_play <- serves %>% filter(in_play == 1)
+in_play$p_fbk <- predict(m3, xgb.DMatrix(as.matrix(in_play[, features_fbk])))
+
 in_play <- in_play %>%
   mutate(serve_quality = p_ace - p_error - p_fbk)
 
-# Leaderboard
+# ── Leaderboard ───────────────────────────────────────────────────────────────
 leaderboard <- in_play %>%
   group_by(player, serve_team) %>%
   summarise(
@@ -46,6 +100,16 @@ leaderboard <- in_play %>%
 
 print(leaderboard)
 
-saveRDS(list(m1 = m1, m2 = m2, m3 = m3), "data/models.rds")
+saveRDS(
+  list(
+    m1 = m1, m2 = m2, m3 = m3,
+    features_base   = features_base,
+    features_fbk    = features_fbk,
+    player_levels   = player_levels,
+    receiver_levels = receiver_levels,
+    opp_levels      = opp_levels
+  ),
+  "data/models.rds"
+)
 saveRDS(in_play, "data/serve_quality.rds")
 cat("\nDone. Models saved.\n")

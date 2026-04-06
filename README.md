@@ -1,23 +1,23 @@
 # Big West Volleyball Serve Quality Index
 
-An end-to-end sports analytics pipeline quantifying serve effectiveness across 
-the Big West Conference using NCAA play-by-play data, XGBoost modeling, and 
+An end-to-end sports analytics pipeline quantifying serve effectiveness across
+the Big West Conference using NCAA play-by-play data, XGBoost modeling, and
 an interactive R Shiny dashboard.
 
 ## Motivation
 
-Pitch quality modeling in baseball — epitomized by Statcast-powered XGBoost 
-pipelines — chains conditional probabilities to produce a single interpretable 
-score per pitch. This project applies that framework to volleyball serving, a 
+Pitch quality modeling in baseball — epitomized by Statcast-powered XGBoost
+pipelines — chains conditional probabilities to produce a single interpretable
+score per pitch. This project applies that framework to volleyball serving, a
 skill that lacks standardized analytical metrics at the collegiate level.
 
-The core question: **can we predict serve outcomes from contextual features, 
-and if not, what does that tell us about the nature of serving in volleyball?**
+The core question: **what actually drives first-ball-kill outcomes — the server,
+or the receiver?**
 
 ## Data
 
 - **Source:** NCAA stats website via the `ncaavolleyballr` R package
-- **Scope:** All Big West Conference women's volleyball matches, 2024 season
+- **Scope:** All matches involving Big West Conference women's volleyball teams, 2024 season
 - **Volume:** 225 matches, 44,034 serves, 257,265 play-by-play events
 - **Storage:** DuckDB local analytical database
 
@@ -26,114 +26,126 @@ and if not, what does that tell us about the nature of serving in volleyball?**
 ### Serve Outcome Chain
 
 Each serve results in one of three mutually exclusive outcomes:
+
+```
 P(Ace)                    — serve lands untouched
 P(Error)                  — serve out or into net
 P(FBK Against | In Play)  — opponent kills on first ball after reception
+```
 
 ### Serve Quality Index
-Serve Quality = P(Ace) - P(Error) - P(FBK Against)
 
-Higher scores indicate more effective serving. All scores are negative in 
-practice because FBK against probability (~0.29) dominates ace probability 
+```
+Serve Quality = P(Ace) - P(Error) - P(FBK Against)
+```
+
+Higher scores indicate more effective serving. All scores are negative in
+practice because FBK against probability (~0.29) dominates ace probability
 (~0.057) — scores are meaningful relatively, not absolutely.
 
 ### Feature Engineering
 
-To prevent data leakage, player-level features are computed from prior matches 
-only. For each serve, the model sees:
+All player-level features are computed from prior matches only to prevent
+data leakage. Features split by model:
 
+**Ace and error models (all serves):**
 - `prior_ace_rate` — server's historical ace rate in all preceding matches
-- `prior_error_rate` — server's historical error rate in all preceding matches  
-- `prior_fbk_rate` — server's historical FBK concession rate in all preceding matches
+- `prior_error_rate` — server's historical error rate in all preceding matches
+- `match_ace_rate` — server's ace rate so far in the current match
+- `match_error_rate` — server's error rate so far in the current match
+- `score_diff` — server's score minus receiver's score
 - `set_num` — current set number
-- `score_diff` — server's score minus receiver's score at time of serve
+- `is_home` — whether the serving team is at home
+- `is_late_set` — whether either team's score is ≥ 20
+
+**FBK model (in-play serves only):**
+- All features above, plus:
+- `receiver_id` — identity of the player receiving the serve
+- `receiver_prior_fbk_rate` — receiver's historical FBK concession rate
+- `prior_fbk_rate` — server's historical FBK rate against
+- `opp_prior_fbk_rate` — receiving team's historical FBK rate
 
 ### Modeling
 
-Three XGBoost binary classifiers, one per outcome, trained on 205 matches 
-(~40,000 serves) and validated on a held-out set of 20 matches (~3,700 serves).
+Three XGBoost binary classifiers, one per outcome. Hyperparameters tuned with
+5-fold cross-validation and early stopping (up to 500 rounds, `eta = 0.05`,
+`max_depth = 4`). Trained on 205 matches (~34,000 in-play serves) and validated
+on a chronological holdout of 20 matches (~3,700 serves).
 
 ### Validation Results
 
 | Metric | Value |
 |---|---|
-| Baseline logloss | 0.6075 |
-| Model logloss | 0.6203 |
-| AUC | 0.517 |
+| Baseline logloss | 0.6060 |
+| Model logloss | 0.5483 |
+| Improvement | 0.0577 |
+| AUC | 0.630 |
 
-Out-of-sample AUC of 0.517 indicates the model has negligible predictive power 
-beyond the historical average baseline. This is the central finding of the project.
+Out-of-sample AUC of 0.630 indicates meaningful predictive power from
+play-by-play data alone, without any tracking inputs.
 
-## Key Finding
+## Key Findings
 
-**Serve outcomes in volleyball are not meaningfully predictable from contextual 
-features alone.** The model converges to player historical averages, suggesting 
-that serve quality is a stable player-level trait but not situationally 
-predictable without tracking data — serve location, type, speed, and spin.
+**Receiver identity drives FBK outcomes far more than server skill.**
 
-This mirrors a known limitation in early baseball analytics before Statcast: 
-outcome-based models plateau without spatial and physical tracking inputs. The 
-volleyball equivalent of Statcast does not yet exist at the NCAA level.
+XGBoost feature importance on the held-out test set:
 
-The Serve Quality Index therefore functions as a **stabilized player rating** 
-rather than a situational prediction engine — still analytically useful for 
-roster evaluation and opponent scouting.
+| Feature | Gain |
+|---|---|
+| `receiver_id` | 81.6% |
+| `receiver_prior_fbk_rate` | 4.9% |
+| `opp_prior_fbk_rate` | 3.3% |
+| `player_id` (server) | 2.1% |
+| `prior_fbk_rate` (server) | 1.5% |
+| All other features | 6.6% |
 
-## Conference Results (Top 10, min. 15 serves)
+The receiver alone accounts for 81.6% of model gain. Server identity and
+historical rates contribute less than 4% combined. Game state features
+(`set_num`, `is_late_set`, `is_home`) are near zero.
 
-| Rank | Player | Team | Serves | Quality | P(Ace) | P(FBK Against) |
-|---|---|---|---|---|---|---|
-| 1 | Maddie Cugino | Gonzaga | 30 | -0.093 | 0.100 | 0.167 |
-| 2 | Natalie Glenn | Long Beach St. | 274 | -0.132 | 0.076 | 0.203 |
-| 3 | Michelle Zhao | UC Santa Barbara | 90 | -0.138 | 0.075 | 0.210 |
-| 4 | Ameena Campbell | Cal St. Fullerton | 61 | -0.158 | 0.074 | 0.205 |
-| 5 | Emily McDaniel | UC San Diego | 118 | -0.193 | 0.076 | 0.253 |
-| 6 | Grace Stone | CSUN | 85 | -0.201 | 0.084 | 0.271 |
-| 7 | Makena Morrison | UC Davis | 341 | -0.209 | 0.062 | 0.267 |
+**What this means:** a first-ball kill is primarily determined by who receives
+the serve, not who serves it. This has direct implications for how serve quality
+should be interpreted — a server whose opponents concede high FBK rates may be
+benefiting from targeting weak passers rather than generating serves that are
+inherently difficult to handle.
 
-*Natalie Glenn (Long Beach St., 274 serves) and Makena Morrison (UC Davis, 341 serves) 
-are the most reliable high-volume servers in the conference.*
+**The Serve Quality Index functions as a receiver-adjusted server rating.**
+Players who consistently face weak passers are penalized relative to raw FBK
+rates; those who face strong passers are credited. This makes it more useful
+for cross-opponent comparison than raw statistics.
 
-## Cal Poly Results
-
-| Rank | Player | Serves | Quality | P(Ace) | P(Error) | P(FBK Against) |
-|---|---|---|---|---|---|---|
-| 1 | Elif Hurriyet | 429 | -0.228 | 0.063 | 0.011 | 0.280 |
-| 2 | Emme Bullis | 373 | -0.233 | 0.066 | 0.011 | 0.288 |
-| 3 | Tommi Stockham | 510 | -0.235 | 0.067 | 0.009 | 0.293 |
-| 4 | Ella Scott | 319 | -0.252 | 0.062 | 0.016 | 0.297 |
-| 5 | Kendall Beshear | 185 | -0.264 | 0.048 | 0.008 | 0.304 |
-| 6 | Lizzy Markovska | 266 | -0.264 | 0.047 | 0.009 | 0.303 |
-| 7 | London Haberfield | 382 | -0.301 | 0.047 | 0.009 | 0.340 |
-| 8 | Samantha Callahan | 46 | -0.309 | 0.063 | 0.077 | 0.296 |
-
-*Tommi Stockham leads Cal Poly in serve volume (510) with the third-best quality 
-score. Samantha Callahan has the highest service error rate on the roster (7.7%), 
-the most actionable finding for coaching staff.*
+This also mirrors a known ceiling in outcome-based sports modeling: without
+spatial tracking data (serve location, trajectory, speed), the model cannot
+separate server intent from receiver weakness. The volleyball equivalent of
+Statcast does not yet exist at the NCAA level.
 
 ## Stack
 
 - **R** — data wrangling, feature engineering, modeling, visualization
 - **DuckDB** — local analytical database queried with SQL
-- **XGBoost** — gradient boosted tree models for outcome prediction
+- **XGBoost** — gradient boosted tree models with CV tuning
 - **R Shiny** — interactive conference-wide serve quality dashboard
 
 ## Project Structure
+
+```
 scripts/
-01_data_pull.R             # API data collection, DuckDB storage
-02_sql_explore.R           # SQL analytical queries
-03_feature_engineering.R   # Rally-level feature construction
-04_model.R                 # XGBoost training and leaderboard
-05_prior_features.R        # Rolling per-player prior rates (no data leakage)
-06_validation.R            # Out-of-sample validation
+  01_data_pull.R           # Pull all Big West schedules and PBP via ncaavolleyballr
+  02_sql_explore.R         # SQL analytical queries against DuckDB
+  03_feature_engineering.R # Rally-level feature construction (receiver, home/away, etc.)
+  04_model.R               # XGBoost training, CV tuning, leaderboard, model artifacts
+  05_prior_features.R      # Rolling per-player prior rates (no data leakage)
+  06_validation.R          # Chronological holdout validation + feature importance
 shiny_app/
-app.R                      # Interactive Shiny dashboard
-data/
-volleyball.duckdb          # Raw PBP data (257k rows)
-big_west_contests.rds      # Contest metadata with dates (output of 01)
-serves_clean.rds           # Engineered serve dataset (output of 03)
-serves_featured.rds        # With historical player prior rates (output of 05)
-serve_quality.rds          # Model predictions and scores (output of 04)
+  app.R                    # Interactive serve quality dashboard
+data/                      # Not tracked in git — generated by scripts
+  volleyball.duckdb        # Raw PBP data (257k rows)
+  big_west_contests.rds    # Contest metadata with dates (output of 01)
+  serves_clean.rds         # Serve-level dataset with receiver and game state (output of 03)
+  serves_featured.rds      # With rolling prior rates for all players (output of 05)
+  serve_quality.rds        # Model predictions and quality scores (output of 04)
+  models.rds               # Trained models and factor encodings (output of 04)
+```
 
 ## Reproducing the Data
 
@@ -150,29 +162,36 @@ dir.create("data", showWarnings = FALSE)
 source("scripts/01_data_pull.R")   # live API pull — ~5 sec per match, expect 15–20 min
 source("scripts/02_sql_explore.R")
 source("scripts/03_feature_engineering.R")
+source("scripts/05_prior_features.R")  # must run before 04
 source("scripts/04_model.R")
-source("scripts/05_prior_features.R")
 source("scripts/06_validation.R")
 ```
-Script 01 builds the contest list automatically from all Big West team schedules via
-`ncaavolleyballr`. Skip it if `data/volleyball.duckdb` already exists.
+
+Script 01 builds the contest list automatically from all Big West team schedules
+via `ncaavolleyballr`. Skip it if `data/volleyball.duckdb` already exists.
 
 **3. Launch the app**
 ```r
 shiny::runApp("shiny_app")
 ```
 
+The app defaults to Cal Poly. Use the team dropdown to view any conference team
+or select "All Teams" for the full leaderboard.
+
 ## Limitations and Future Work
 
-- Tracking data (serve location, type, speed) would substantially improve 
-  predictive power — the primary bottleneck identified by validation
-- Opponent reception quality as a covariate would contextualize FBK rates 
-  against stronger vs weaker passing teams
-- Extending to multiple seasons would stabilize player ratings and enable 
+- **Tracking data** (serve location, type, speed) is the primary bottleneck —
+  the model cannot separate server mechanics from receiver weakness without it
+- **Receiver targeting** — identifying which player a server is targeting, rather
+  than just who received, would add a strategic layer currently invisible in PBP data
+- **Multiple seasons** would stabilize ratings for low-volume players and enable
   year-over-year tracking
-- A Bayesian shrinkage approach would handle low-sample players more 
-  appropriately than the current mean imputation
+- **Bayesian shrinkage** would handle first-match imputation more principally
+  than the current global mean fallback
+- **Reception quality grades** (if available via DataVolley/VolleyMetrics) would
+  replace the binary FBK outcome with a continuous reception quality score
 
 ## Author
-Drew King — Statistics B.S., Cal Poly SLO  
+
+Drew King — Statistics B.S., Cal Poly SLO
 Sports Analytics | github.com/dk0076
