@@ -45,7 +45,6 @@ leaderboard <- in_play %>%
   arrange(desc(avg_quality))
 
 print(leaderboard)
-View(leaderboard)
 
 saveRDS(list(m1 = m1, m2 = m2, m3 = m3), "data/models.rds")
 saveRDS(in_play, "data/serve_quality.rds")

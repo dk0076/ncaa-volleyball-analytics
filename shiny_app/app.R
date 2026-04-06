@@ -1,9 +1,9 @@
 library(shiny)
 library(dplyr)
 library(ggplot2)
+library(ggrepel)
 
-
-in_play <- readRDS("serve_quality.rds")
+in_play <- readRDS("../data/serve_quality.rds")
 
 # Summarize for leaderboard
 leaderboard <- in_play %>%

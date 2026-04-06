@@ -124,13 +124,35 @@ scripts/
 02_sql_explore.R           # SQL analytical queries
 03_feature_engineering.R   # Rally-level feature construction
 04_model.R                 # XGBoost training and leaderboard
-05_shiny_app.R             # Interactive Shiny dashboard
+05_prior_features.R        # Rolling per-player prior rates (no data leakage)
 06_validation.R            # Out-of-sample validation
+shiny_app/
+app.R                      # Interactive Shiny dashboard
 data/
 volleyball.duckdb          # Raw PBP data (257k rows)
-serves_clean.rds           # Engineered serve dataset
-serves_featured.rds        # With historical player features
-serve_quality.rds          # Model predictions and scores
+serves_clean.rds           # Engineered serve dataset (output of 03)
+serves_featured.rds        # With historical player prior rates (output of 05)
+big_west_contests.rds      # Contest metadata with dates (output of 05)
+serve_quality.rds          # Model predictions and scores (output of 04)
+
+## Reproducing the Data
+
+`data/` is not tracked in git. To reproduce from scratch:
+
+1. **Create `data/cal_poly_contests.rds`** — this is a one-time prerequisite for
+   `01_data_pull.R`. Generate it using `ncaavolleyballr` before running script 01:
+   ```r
+   library(ncaavolleyballr)
+   library(dplyr)
+   contests <- get_team_schedule(team = "Cal Poly", season = "2024") # adjust as needed
+   saveRDS(contests, "data/cal_poly_contests.rds")
+   ```
+   The data frame must have a `contest` column of contest IDs.
+
+2. **Run scripts 01 → 06 in order.** Skip 01 if `data/volleyball.duckdb` already exists.
+
+3. **Launch the app** with `shiny::runApp("shiny_app")` from the project root after
+   running script 04 (which writes `data/serve_quality.rds`).
 
 ## Limitations and Future Work
 
@@ -142,9 +164,6 @@ serve_quality.rds          # Model predictions and scores
   year-over-year tracking
 - A Bayesian shrinkage approach would handle low-sample players more 
   appropriately than the current mean imputation
-
-## Author
-
 
 ## Author
 Drew King — Statistics B.S., Cal Poly SLO  
