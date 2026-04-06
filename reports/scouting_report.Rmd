@@ -289,5 +289,6 @@ if (length(cp_servers) > 0 && length(opp_receivers) > 0 && nrow(top3) > 0) {
 \vspace{12pt}
 \footnotesize
 *Serve Quality = P(Ace) - P(Error) - P(In Play) × P(FBK Against | In Play). All predictions based on historical
-player rates and XGBoost model trained on 2025 Big West season PBP data (AUC = `r val_metrics$auc`).
+player rates and XGBoost model trained on 2025 Big West season PBP data. M3 holdout AUC = `r val_metrics$auc`
+(train-only refit on first `r val_metrics$n_train` serves; deployed model trained on full season).
 Game state set to neutral (Set 2, tied score, away).*

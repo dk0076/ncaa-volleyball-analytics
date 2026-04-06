@@ -2,6 +2,11 @@ library(xgboost)
 library(dplyr)
 library(pROC)
 
+# Matches seed in 04_model.R — CV round counts are comparable across scripts,
+# though validation models are trained on the train subset only (not models.rds).
+# Reported AUC characterizes the architecture, not the deployed model specifically.
+set.seed(42)
+
 serves_featured  <- readRDS("data/serves_featured.rds")
 all_contests_df  <- readRDS("data/big_west_contests.rds")
 model_artifacts  <- readRDS("data/models.rds")
@@ -75,13 +80,19 @@ tune_and_validate <- function(X_train, y_train, X_test, y_test, label) {
   model_ll    <- logloss(y_test, preds)
   auc_val     <- round(as.numeric(pROC::auc(pROC::roc(y_test, preds, quiet = TRUE))), 4)
 
+  # SHAP importance: mean(|SHAP|) per feature on test set.
+  # More reliable than gain for high-cardinality features like receiver_id.
+  shap_matrix <- predict(model, xgb.DMatrix(X_test), predcontrib = TRUE)
+  shap_matrix <- shap_matrix[, -ncol(shap_matrix), drop = FALSE]  # drop bias column
+  shap_imp    <- sort(colMeans(abs(shap_matrix)), decreasing = TRUE)
+
   cat("\n--- Validation:", label, "---\n")
   cat("Baseline logloss:", round(baseline_ll, 4), "\n")
   cat("Model logloss:   ", round(model_ll,    4), "\n")
   cat("Improvement:     ", round(baseline_ll - model_ll, 4), "\n")
   cat("AUC:             ", auc_val, "\n")
-  cat("Top features:\n")
-  print(xgb.importance(model = model))
+  cat("SHAP importance (mean |SHAP| on test set):\n")
+  print(round(shap_imp, 5))
 
   list(baseline_ll = round(baseline_ll, 4),
        model_ll    = round(model_ll, 4),

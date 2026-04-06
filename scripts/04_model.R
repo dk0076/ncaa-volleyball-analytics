@@ -1,6 +1,8 @@
 library(xgboost)
 library(dplyr)
 
+set.seed(42)  # matches 06_validation.R so CV round counts are comparable
+
 stopifnot("Run 05_prior_features.R before this script" =
             file.exists("data/serves_featured.rds"))
 
@@ -81,6 +83,8 @@ m3 <- xgb.train(params = params, data = xgb.DMatrix(X_fbk, label = in_play$fbk_a
 
 serves$p_ace   <- predict(m1, xgb.DMatrix(X_all))
 serves$p_error <- predict(m2, xgb.DMatrix(X_all))
+# Safety clamp: M1/M2 are independent, so p_ace + p_error could theoretically
+# exceed 1. In practice this has not occurred on the current dataset (0/32k rows).
 serves$p_in_play <- pmax(0, 1 - serves$p_ace - serves$p_error)
 
 # Predict P(FBK | In Play) on in-play subset, then join back to full serves
