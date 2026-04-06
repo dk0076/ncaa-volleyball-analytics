@@ -130,32 +130,22 @@ shiny_app/
 app.R                      # Interactive Shiny dashboard
 data/
 volleyball.duckdb          # Raw PBP data (257k rows)
+big_west_contests.rds      # Contest metadata with dates (output of 01)
 serves_clean.rds           # Engineered serve dataset (output of 03)
 serves_featured.rds        # With historical player prior rates (output of 05)
-big_west_contests.rds      # Contest metadata with dates (output of 05)
 serve_quality.rds          # Model predictions and scores (output of 04)
 
 ## Reproducing the Data
 
-`data/` is not tracked in git. To reproduce from scratch, open the project via
-`ncaa-volleyball-analytics.Rproj` (sets the working directory automatically), then:
+`data/` is not tracked in git. Open the project via `ncaa-volleyball-analytics.Rproj`
+(sets the working directory automatically), then:
 
 **1. Create the data folder**
 ```r
 dir.create("data", showWarnings = FALSE)
 ```
 
-**2. Create `data/cal_poly_contests.rds`** — one-time prerequisite for `01_data_pull.R`.
-Use `ncaavolleyballr` to fetch a schedule with contest IDs and save it:
-```r
-library(ncaavolleyballr)
-# See ncaavolleyballr docs for the correct schedule function and season format.
-# The saved data frame must have a column named `contest` containing contest IDs.
-contests <- <schedule_function>(...)
-saveRDS(contests, "data/cal_poly_contests.rds")
-```
-
-**3. Run scripts in order**
+**2. Run scripts in order**
 ```r
 source("scripts/01_data_pull.R")   # live API pull — ~5 sec per match, expect 15–20 min
 source("scripts/02_sql_explore.R")
@@ -164,9 +154,10 @@ source("scripts/04_model.R")
 source("scripts/05_prior_features.R")
 source("scripts/06_validation.R")
 ```
-Skip script 01 if `data/volleyball.duckdb` already exists.
+Script 01 builds the contest list automatically from all Big West team schedules via
+`ncaavolleyballr`. Skip it if `data/volleyball.duckdb` already exists.
 
-**4. Launch the app**
+**3. Launch the app**
 ```r
 shiny::runApp("shiny_app")
 ```

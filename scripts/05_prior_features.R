@@ -1,21 +1,7 @@
-library(duckdb)
 library(dplyr)
 
-serves <- readRDS("data/serves_clean.rds")
-
-# --- Get contest dates from DuckDB ---
-con <- dbConnect(duckdb(), dbdir = "data/volleyball.duckdb", read_only = TRUE)
-cols <- dbListFields(con, "pbp")
-if ("date" %in% cols) {
-  contests_df <- dbGetQuery(con, "SELECT DISTINCT contestid, date FROM pbp")
-} else {
-  stop("pbp table has no 'date' column — cannot order contests chronologically.")
-}
-dbDisconnect(con)
-
-# Save contest metadata for 06_validation.R
-big_west_contests <- contests_df %>% rename(contest = contestid)
-saveRDS(big_west_contests, "data/big_west_contests.rds")
+serves           <- readRDS("data/serves_clean.rds")
+big_west_contests <- readRDS("data/big_west_contests.rds")  # written by 01_data_pull.R
 
 # Chronological contest order
 contest_order <- big_west_contests %>%
@@ -85,4 +71,3 @@ serves_featured <- serves %>%
 
 saveRDS(serves_featured, "data/serves_featured.rds")
 cat("Saved serves_featured.rds:", nrow(serves_featured), "rows\n")
-cat("Saved big_west_contests.rds:", nrow(big_west_contests), "contests\n")
