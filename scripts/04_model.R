@@ -78,7 +78,7 @@ m3 <- xgb.train(params = params, data = xgb.DMatrix(X_fbk, label = in_play$fbk_a
 
 serves$p_ace   <- predict(m1, xgb.DMatrix(X_all))
 serves$p_error <- predict(m2, xgb.DMatrix(X_all))
-serves$p_in_play <- 1 - serves$p_ace - serves$p_error
+serves$p_in_play <- pmax(0, 1 - serves$p_ace - serves$p_error)
 
 # Predict P(FBK | In Play) on in-play subset, then join back to full serves
 # row_id was added before filtering so we can rejoin correctly
@@ -100,7 +100,7 @@ leaderboard <- serves %>%
     avg_quality = round(mean(serve_quality), 3),
     avg_p_ace   = round(mean(p_ace), 3),
     avg_p_error = round(mean(p_error), 3),
-    avg_p_fbk   = round(mean(p_fbk), 3),
+    avg_p_fbk   = round(mean(p_fbk[in_play == 1]), 3),
     .groups = "drop"
   ) %>%
   filter(n_serves >= 10) %>%

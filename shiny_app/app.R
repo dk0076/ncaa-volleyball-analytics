@@ -13,7 +13,7 @@ leaderboard <- serves %>%
     avg_quality = round(mean(serve_quality), 3),
     avg_p_ace   = round(mean(p_ace), 3),
     avg_p_error = round(mean(p_error), 3),
-    avg_p_fbk   = round(mean(p_fbk[in_play == 1]), 3),
+    avg_p_fbk   = round(mean(p_fbk[in_play == 1L], na.rm = TRUE), 3),
     .groups = "drop"
   ) %>%
   filter(n_serves >= 10) %>%

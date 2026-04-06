@@ -21,6 +21,7 @@ library(xgboost)
 serves    <- readRDS("../data/serves_featured.rds")
 quality   <- readRDS("../data/serve_quality.rds")
 artifacts <- readRDS("../data/models.rds")
+val_metrics <- readRDS("../data/validation_metrics.rds")
 
 opponent  <- params$opponent
 cal_poly  <- "Cal Poly"
@@ -129,7 +130,7 @@ threats <- quality %>%
   arrange(desc(Quality)) %>%
   mutate(
     Rank             = row_number(),
-    `Threat (0-100)` = round(100 * (Quality - min(Quality)) / (max(Quality) - min(Quality)))
+    `Threat (0-100)` = if (n() > 1) round(100 * (Quality - min(Quality)) / (max(Quality) - min(Quality))) else 100L
   ) %>%
   select(Rank, Player = player, Serves, `Threat (0-100)`, Quality, `P(Ace)`, `P(Err)`, `P(FBK)`)
 
@@ -178,13 +179,11 @@ if (length(cp_servers) == 0 || length(opp_receivers) == 0) {
               by = "player") %>%
     left_join(latest_receiver_rates %>% filter(opp_team == opponent),
               by = "receiver") %>%
-    left_join(latest_opp_rates %>% filter(opp_team == opponent),
-              by = c("receiver" = "opp_team")) %>%
     mutate(
-      opp_prior_fbk_rate = coalesce(
-        opp_prior_fbk_rate,
-        mean(serves$fbk_against[serves$in_play == 1], na.rm = TRUE)
-      ),
+      opp_prior_fbk_rate = {
+        rate <- latest_opp_rates$opp_prior_fbk_rate[latest_opp_rates$opp_team == opponent]
+        if (length(rate) == 1) rate else mean(serves$fbk_against[serves$in_play == 1], na.rm = TRUE)
+      },
       # Neutral game state
       set_num     = 2L,
       score_diff  = 0L,
@@ -206,10 +205,11 @@ if (length(cp_servers) == 0 || length(opp_receivers) == 0) {
   X_base <- as.matrix(matchups[, features_base])
   X_fbk  <- as.matrix(matchups[, features_fbk])
 
-  matchups$p_ace   <- predict(artifacts$m1, xgb.DMatrix(X_base))
-  matchups$p_error <- predict(artifacts$m2, xgb.DMatrix(X_base))
-  matchups$p_fbk   <- predict(artifacts$m3, xgb.DMatrix(X_fbk))
-  matchups$quality <- round(matchups$p_ace - matchups$p_error - matchups$p_fbk, 3)
+  matchups$p_ace     <- predict(artifacts$m1, xgb.DMatrix(X_base))
+  matchups$p_error   <- predict(artifacts$m2, xgb.DMatrix(X_base))
+  matchups$p_fbk     <- predict(artifacts$m3, xgb.DMatrix(X_fbk))
+  matchups$p_in_play <- pmax(0, 1 - matchups$p_ace - matchups$p_error)
+  matchups$quality   <- round(matchups$p_ace - matchups$p_error - matchups$p_in_play * matchups$p_fbk, 3)
 
   # Pivot to wide matrix
   matrix_wide <- matchups %>%
@@ -278,5 +278,5 @@ if (length(cp_servers) > 0 && length(opp_receivers) > 0 && nrow(top3) > 0) {
 \vspace{12pt}
 \footnotesize
 *Serve Quality = P(Ace) - P(Error) - P(FBK Against). All predictions based on historical
-player rates and XGBoost model trained on 2025 Big West season PBP data (AUC = 0.630).
+player rates and XGBoost model trained on 2025 Big West season PBP data (AUC = `r val_metrics$auc`).
 Game state set to neutral (Set 2, tied score, away).*

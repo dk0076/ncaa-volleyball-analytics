@@ -1,13 +1,22 @@
 library(dplyr)
+library(duckdb)
 
-serves            <- readRDS("data/serves_clean.rds")
-big_west_contests <- readRDS("data/big_west_contests.rds")
+serves <- readRDS("data/serves_clean.rds")
 
-# Chronological contest order
-contest_order <- big_west_contests %>%
-  mutate(date_parsed = as.Date(date, "%m/%d/%Y")) %>%
+# Derive contest order from PBP directly — covers all contests including
+# expanded-team non-conference games that aren't in big_west_contests.rds
+con <- dbConnect(duckdb(), dbdir = "data/volleyball.duckdb", read_only = TRUE)
+contest_dates <- dbGetQuery(con, "
+  SELECT DISTINCT contestid, MIN(date) as date
+  FROM pbp
+  GROUP BY contestid
+")
+dbDisconnect(con)
+
+contest_order <- contest_dates %>%
+  mutate(date_parsed = as.Date(date)) %>%
   arrange(date_parsed) %>%
-  pull(contest)
+  pull(contestid)
 
 serves <- serves %>%
   mutate(contest_idx = match(as.character(contestid), as.character(contest_order)))

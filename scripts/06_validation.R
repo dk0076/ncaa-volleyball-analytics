@@ -83,11 +83,26 @@ baseline_ll <- logloss(y_test, rep(mean(y_train), length(y_test)))
 model_ll    <- logloss(y_test, preds)
 roc_obj     <- pROC::roc(y_test, preds, quiet = TRUE)
 
+auc_val <- round(as.numeric(pROC::auc(roc_obj)), 4)
+
 cat("\n--- Validation: P(FBK Against) ---\n")
 cat("Baseline logloss:", round(baseline_ll, 4), "\n")
 cat("Model logloss:   ", round(model_ll,    4), "\n")
 cat("Improvement:     ", round(baseline_ll - model_ll, 4), "\n")
-cat("AUC:             ", round(pROC::auc(roc_obj), 4), "\n")
+cat("AUC:             ", auc_val, "\n")
 
 cat("\nTop features:\n")
 print(xgb.importance(model = m3_val))
+
+saveRDS(
+  list(
+    baseline_logloss = round(baseline_ll, 4),
+    model_logloss    = round(model_ll,    4),
+    improvement      = round(baseline_ll - model_ll, 4),
+    auc              = auc_val,
+    n_train          = nrow(train),
+    n_test           = nrow(test)
+  ),
+  "data/validation_metrics.rds"
+)
+cat("Validation metrics saved to data/validation_metrics.rds\n")
