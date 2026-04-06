@@ -32,38 +32,58 @@ server, or the receiver?**
 ## Metrics
 
 ### Raw Outcomes (from PBP)
-- **Ace** — serve lands untouched
-- **Service Error** — serve out or into net
-- **In Play** — serve returned (not ace or error)
-- **FBK Against** — receiving team scored immediately after reception; observed directly from `"First ball kill"` events in the PBP event log
+
+-   **Ace** — serve lands untouched
+-   **Service Error** — serve out or into net
+-   **In Play** — serve returned (not ace or error)
+-   **FBK Against** — receiving team scored immediately after reception;
+    observed directly from `"First ball kill"` events in the PBP event
+    log
 
 ### Server Features (rolling, prior matches only — no data leakage)
-- **prior_ace_rate** — server's ace rate in all preceding matches
-- **prior_error_rate** — server's error rate in all preceding matches
-- **prior_fbk_rate** — server's FBK-against rate in all preceding matches
-- **match_ace_rate** — server's ace rate so far in current match
-- **match_error_rate** — server's error rate so far in current match
+
+-   **prior_ace_rate** — server's ace rate in all preceding matches
+-   **prior_error_rate** — server's error rate in all preceding matches
+-   **prior_fbk_rate** — server's FBK-against rate in all preceding
+    matches
+-   **match_ace_rate** — server's ace rate so far in current match
+-   **match_error_rate** — server's error rate so far in current match
 
 ### Receiver / Team Features
-- **receiver_prior_fbk_rate** — receiver's historical FBK concession rate
-- **opp_prior_fbk_rate** — receiving team's overall historical FBK rate
+
+-   **receiver_prior_fbk_rate** — receiver's historical FBK concession
+    rate
+-   **opp_prior_fbk_rate** — receiving team's overall historical FBK
+    rate
 
 ### Game State Features
-- **score_diff** — server score minus receiver score at time of serve
-- **set_num** — current set number
-- **is_home** — whether the serving team is at home
-- **is_late_set** — whether either team's score is ≥ 20
+
+-   **score_diff** — server score minus receiver score at time of serve
+-   **set_num** — current set number
+-   **is_home** — whether the serving team is at home
+-   **is_late_set** — whether either team's score is ≥ 20
 
 ### Model Outputs (XGBoost)
-- **P(Ace)** — predicted probability the serve is an ace
-- **P(Error)** — predicted probability the serve is an error
-- **P(FBK)** — predicted probability of FBK against (in-play serves only)
-- **Serve Quality = P(Ace) - P(Error) - P(FBK Against)**
+
+-   **P(Ace)** — predicted probability the serve is an ace
+-   **P(Error)** — predicted probability the serve is an error
+-   **P(FBK)** — predicted probability of FBK against (in-play serves
+    only)
+-   **Serve Quality = P(Ace) - P(Error) - P(FBK Against)**
 
 ### Scouting Report Metrics
-- **FBK Rate (receivers)** — fraction of receptions resulting in FBK against the server; lower = weaker passer = serve target
-- **Serve Quality Index (servers)** — average predicted serve quality across all serves
-- **Matchup Quality** — serve quality predicted for a specific server × receiver pairing at neutral game state (Set 2, tied score, away)
+
+-   **FBK Rate (receivers)** — fraction of receptions resulting in FBK
+    against the server; lower = weaker passer = serve target
+-   **Serve Quality Index (servers)** — average predicted serve quality
+    across all serves
+-   **Threat (0-100)** — rescales Serve Quality to a 0–100 range within
+    the opponent's roster; 100 = biggest threat to Cal Poly (highest
+    quality = most dangerous server), 0 = least threatening; relative
+    ranking only, not comparable across opponents;
+    `Threat = 100 × (Quality - min) / (max - min)`
+-   **Matchup Quality** — serve quality predicted for a specific server
+    × receiver pairing at neutral game state (Set 2, tied score, away)
 
 ## Methodology
 

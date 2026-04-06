@@ -3,9 +3,9 @@ title: "Serve Scouting Report"
 subtitle: "Cal Poly vs. `r params$opponent`"
 date: "`r format(Sys.Date(), '%B %d, %Y')`"
 output:
-  pdf_document:
-    latex_engine: xelatex
+  html_document:
     toc: false
+    self_contained: true
 params:
   opponent: "UC Santa Barbara"
 ---
@@ -69,7 +69,7 @@ latest_opp_rates <- serves %>%
 ## Their Weakest Receivers — Serve Targets
 
 Players ranked by historical FBK concession rate (lower = weaker passer = better target).
-Minimum 30 receptions. Focus on the top of this list.
+Minimum 20 receptions. Focus on the top of this list.
 
 ```{r receiver-targets}
 receiver_targets <- serves %>%
@@ -79,24 +79,21 @@ receiver_targets <- serves %>%
   filter(opp_team == opponent) %>%
   group_by(receiver) %>%
   summarise(
-    receptions    = n(),
-    fbk_against   = sum(fbk_against),
-    fbk_rate      = round(mean(fbk_against), 3),
-    .groups = "drop"
+    receptions = n(),
+    fbk_rate   = round(mean(fbk_against), 3),
+    .groups    = "drop"
   ) %>%
-  filter(receptions >= 30) %>%
+  filter(receptions >= 20) %>%
   arrange(fbk_rate) %>%
   mutate(
-    Rank       = row_number(),
-    `FBK Rate` = fbk_rate,
-    Receptions = receptions,
+    Rank           = row_number(),
     Recommendation = case_when(
       fbk_rate <= quantile(fbk_rate, 0.33) ~ "Primary Target",
       fbk_rate <= quantile(fbk_rate, 0.67) ~ "Secondary Target",
       TRUE                                  ~ "Avoid"
     )
   ) %>%
-  select(Rank, Player = receiver, Receptions, `FBK Rate`, Recommendation)
+  select(Rank, Player = receiver, Receptions = receptions, `FBK Rate` = fbk_rate, Recommendation)
 
 kable(receiver_targets, booktabs = TRUE, linesep = "") %>%
   kable_styling(font_size = 10, latex_options = "hold_position") %>%
@@ -130,8 +127,11 @@ threats <- quality %>%
   ) %>%
   filter(Serves >= 20) %>%
   arrange(desc(Quality)) %>%
-  mutate(Rank = row_number()) %>%
-  select(Rank, Player = player, Serves, Quality, `P(Ace)`, `P(Err)`, `P(FBK)`)
+  mutate(
+    Rank             = row_number(),
+    `Threat (0-100)` = round(100 * (Quality - min(Quality)) / (max(Quality) - min(Quality)))
+  ) %>%
+  select(Rank, Player = player, Serves, `Threat (0-100)`, Quality, `P(Ace)`, `P(Err)`, `P(FBK)`)
 
 kable(threats, booktabs = TRUE, linesep = "") %>%
   kable_styling(font_size = 10, latex_options = "hold_position") %>%
@@ -159,7 +159,7 @@ opp_receivers <- serves %>%
   filter(in_play == 1, opp_team == opponent, !is.na(receiver)) %>%
   group_by(receiver) %>%
   summarise(n = n(), .groups = "drop") %>%
-  filter(n >= 30) %>%
+  filter(n >= 20) %>%
   pull(receiver)
 
 if (length(cp_servers) == 0 || length(opp_receivers) == 0) {
@@ -223,7 +223,7 @@ if (length(cp_servers) == 0 || length(opp_receivers) == 0) {
 
   tbl <- kable(matrix_wide, booktabs = TRUE, linesep = "",
                caption = "Predicted Serve Quality by Matchup") %>%
-    kable_styling(font_size = 9, latex_options = c("hold_position", "scale_down"))
+    kable_styling(font_size = 9, latex_options = c("scale_down", "landscape"))
 
   for (col in intersect(primary_targets, colnames(matrix_wide)[-1])) {
     tbl <- tbl %>%
