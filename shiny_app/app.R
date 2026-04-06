@@ -1,7 +1,7 @@
 library(shiny)
 library(dplyr)
 library(ggplot2)
-library(ggrepel)
+
 
 in_play <- readRDS("serve_quality.rds")
 
