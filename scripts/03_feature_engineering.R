@@ -19,16 +19,36 @@ receivers <- pbp %>%
   ungroup() %>%
   select(contestid, set, rally, receiver = player)
 
+# Serve outcome lookup tables.
+# "Service error" events are tagged to the RECEIVING team in ncaavolleyballr,
+# not the serving team. "Ace" events ARE tagged to the serving team but a
+# "Serve" event also fires for the same rally. Strategy: use only "Serve"
+# events as the base (one row per rally, always tagged to the server), then
+# join ace/error outcomes by rally key.
+ace_rallies <- pbp %>%
+  filter(event == "Ace") %>%
+  select(contestid, set, rally) %>%
+  distinct() %>%
+  mutate(is_ace = 1L)
+
+error_rallies <- pbp %>%
+  filter(event == "Service error") %>%
+  select(contestid, set, rally) %>%
+  distinct() %>%
+  mutate(is_error = 1L)
+
 # Build serve-level dataset
 # home_team and away_team are native pbp columns — no extra join needed
 serves <- pbp %>%
-  filter(event %in% c("Serve", "Ace", "Service error")) %>%
-  left_join(fbk_rallies, by = c("contestid", "set", "rally")) %>%
-  left_join(receivers,   by = c("contestid", "set", "rally")) %>%
+  filter(event == "Serve") %>%
+  left_join(ace_rallies,   by = c("contestid", "set", "rally")) %>%
+  left_join(error_rallies, by = c("contestid", "set", "rally")) %>%
+  left_join(fbk_rallies,   by = c("contestid", "set", "rally")) %>%
+  left_join(receivers,     by = c("contestid", "set", "rally")) %>%
   mutate(
-    ace            = as.integer(event == "Ace"),
-    service_error  = as.integer(event == "Service error"),
-    in_play        = as.integer(event == "Serve"),
+    ace            = coalesce(is_ace,   0L),
+    service_error  = coalesce(is_error, 0L),
+    in_play        = as.integer(is.na(is_ace) & is.na(is_error)),
     fbk_against    = as.integer(!is.na(fbk_team) & fbk_team != team),
     set_num        = as.integer(set),
     # Score string is always away-home (e.g. "2-3" = away 2, home 3)
@@ -44,6 +64,7 @@ serves <- pbp %>%
     ),
     opp_team       = ifelse(team == home_team, away_team, home_team)
   ) %>%
+  select(-is_ace, -is_error) %>%
   # Within-match rolling counts (excludes current serve)
   arrange(contestid, set_num, rally) %>%
   group_by(contestid, player) %>%
