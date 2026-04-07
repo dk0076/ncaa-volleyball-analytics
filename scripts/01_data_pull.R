@@ -33,6 +33,7 @@ all_contests_df <- bind_rows(Filter(Negate(is.null), schedules)) %>%
   select(contest, date) %>%
   distinct()
 
+dir.create("data", showWarnings = FALSE)
 saveRDS(all_contests_df, "data/big_west_contests.rds")
 cat("Total unique contests:", nrow(all_contests_df), "\n")
 

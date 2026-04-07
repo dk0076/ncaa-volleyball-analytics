@@ -75,7 +75,7 @@ Players ranked by historical FBK concession rate (lower = weaker passer = better
 Minimum 20 receptions. Focus on the top of this list.
 
 ```{r receiver-targets}
-use_model_rates <- isTRUE(val_metrics$auc_m3 >= 0.55)
+use_model_rates <- isTRUE(val_metrics$auc_m3 >= 0.60)
 
 receiver_targets <- serves %>%
   filter(in_play == 1, opp_team == opponent, !is.na(receiver)) %>%
@@ -108,7 +108,7 @@ receiver_targets <- serves %>%
   select(Rank, Player = receiver, Receptions = receptions, `FBK Rate` = fbk_rate, Recommendation)
 
 kable(receiver_targets, booktabs = TRUE, linesep = "") %>%
-  kable_styling(font_size = 10, latex_options = "hold_position") %>%
+  kable_styling(font_size = 10, full_width = FALSE, position = "left") %>%
   row_spec(which(receiver_targets$Recommendation == "Primary Target"),
            bold = TRUE, color = "white", background = cp_green) %>%
   row_spec(which(receiver_targets$Recommendation == "Avoid"),
@@ -122,8 +122,8 @@ kable(receiver_targets, booktabs = TRUE, linesep = "") %>%
 
 ## Their Serving Threats — Who to Watch
 
-Cal Poly's defensive preparation. Opponent servers ranked by Serve Quality Index.
-Minimum 20 serves.
+Cal Poly's defensive preparation. Opponent servers ranked by Serve Quality Index (0–100, global scale).
+Minimum 50 serves.
 
 ```{r serving-threats}
 threats <- quality %>%
@@ -131,23 +131,33 @@ threats <- quality %>%
   group_by(player, serve_team) %>%
   summarise(
     Serves   = n(),
-    Quality  = round(mean(serve_quality), 3),
+    Quality  = round(mean(quality_index)),
     `P(Ace)` = round(mean(p_ace), 3),
     `P(Err)` = round(mean(p_error), 3),
-    `P(FBK)` = round(mean(p_fbk), 3),
+    `P(FBK | In Play)` = round(mean(p_fbk[in_play == 1L]), 3),
     .groups  = "drop"
   ) %>%
-  filter(Serves >= 20) %>%
+  filter(Serves >= 50) %>%
   arrange(desc(Quality)) %>%
-  mutate(
-    Rank             = row_number(),
-    `Threat (0-100)` = if (n() > 1) round(100 * (Quality - min(Quality)) / (max(Quality) - min(Quality))) else 100L
-  ) %>%
-  select(Rank, Player = player, Serves, `Threat (0-100)`, Quality, `P(Ace)`, `P(Err)`, `P(FBK)`)
+  mutate(Rank = row_number()) %>%
+  select(Rank, Player = player, Serves, Quality, `P(Ace)`, `P(Err)`, `P(FBK | In Play)`)
 
 kable(threats, booktabs = TRUE, linesep = "") %>%
-  kable_styling(font_size = 10, latex_options = "hold_position") %>%
+  kable_styling(font_size = 10, full_width = FALSE, position = "left") %>%
   row_spec(1:min(3, nrow(threats)), bold = TRUE)
+```
+
+```{r dual-role-note, results='asis'}
+dual_role <- intersect(receiver_targets$Player, threats$Player)
+if (length(dual_role) > 0) {
+  cat(paste0(
+    "*Note: **", paste(dual_role, collapse = "**, **"),
+    "** appear", if (length(dual_role) == 1) "s" else "",
+    " in both tables. When serving, ",
+    if (length(dual_role) == 1) "this player is" else "these players are",
+    " unavailable as reception targets.*"
+  ))
+}
 ```
 
 ---
@@ -220,7 +230,10 @@ if (length(cp_servers) == 0 || length(opp_receivers) == 0) {
   matchups$p_error   <- predict(artifacts$m2, xgb.DMatrix(X_base))
   matchups$p_fbk     <- predict(artifacts$m3, xgb.DMatrix(X_fbk))
   matchups$p_in_play <- pmax(0, 1 - matchups$p_ace - matchups$p_error)
-  matchups$quality   <- round(matchups$p_ace - matchups$p_error - matchups$p_in_play * matchups$p_fbk, 3)
+  quality_raw        <- matchups$p_ace - matchups$p_error - matchups$p_in_play * matchups$p_fbk
+  matchups$quality   <- as.integer(round(
+    100 * (quality_raw - artifacts$quality_min) / (artifacts$quality_max - artifacts$quality_min)
+  ))
 
   # Pivot to wide matrix
   matrix_wide <- matchups %>%
@@ -234,7 +247,7 @@ if (length(cp_servers) == 0 || length(opp_receivers) == 0) {
 
   tbl <- kable(matrix_wide, booktabs = TRUE, linesep = "",
                caption = "Predicted Serve Quality by Matchup") %>%
-    kable_styling(font_size = 9, latex_options = c("scale_down", "landscape"))
+    kable_styling(font_size = 9, full_width = TRUE)
 
   for (col in intersect(primary_targets, colnames(matrix_wide)[-1])) {
     tbl <- tbl %>%
@@ -251,24 +264,29 @@ if (length(cp_servers) == 0 || length(opp_receivers) == 0) {
 
 ```{r recommendations}
 if (length(cp_servers) > 0 && length(opp_receivers) > 0) {
+  # One best receiver per server, then rank across servers — prevents one server
+  # monopolising all recommendations.
   top3 <- matchups %>%
+    group_by(player) %>%
+    slice_max(quality, n = 1, with_ties = FALSE) %>%
+    ungroup() %>%
     arrange(desc(quality)) %>%
     slice_head(n = 3) %>%
     mutate(
-      Rank = row_number(),
-      `Serve Quality` = quality,
-      `P(Ace)` = round(p_ace, 3),
-      `P(FBK)` = round(p_fbk, 3)
+      Rank            = row_number(),
+      `Quality (0-100)` = quality,
+      `P(Ace)`        = round(p_ace, 3),
+      `P(FBK | In Play)` = round(p_fbk, 3)
     ) %>%
     select(Rank,
            `Cal Poly Server` = player,
            `Target Receiver` = receiver,
-           `Serve Quality`,
+           `Quality (0-100)`,
            `P(Ace)`,
-           `P(FBK)`)
+           `P(FBK | In Play)`)
 
   kable(top3, booktabs = TRUE, linesep = "") %>%
-    kable_styling(font_size = 10, latex_options = "hold_position") %>%
+    kable_styling(font_size = 10, full_width = FALSE, position = "left") %>%
     row_spec(1, bold = TRUE, color = "white", background = cp_green)
 }
 ```
@@ -281,14 +299,14 @@ if (length(cp_servers) > 0 && length(opp_receivers) > 0 && nrow(top3) > 0) {
   cat(paste0(
     "**Primary recommendation:** ", best$`Cal Poly Server`,
     " serving to ", best$`Target Receiver`,
-    " (predicted quality: ", best$`Serve Quality`, ", P(FBK) = ", best$`P(FBK)`, ")."
+    " (quality index: ", best$`Quality (0-100)`, "/100, P(FBK | In Play) = ", best$`P(FBK | In Play)`, ")."
   ))
 }
 ```
 
 \vspace{12pt}
 \footnotesize
-*Serve Quality = P(Ace) - P(Error) - P(In Play) × P(FBK Against | In Play). All predictions based on historical
-player rates and XGBoost model trained on 2025 Big West season PBP data. M3 holdout AUC = `r val_metrics$auc`
+*Quality Index (0–100) = P(Ace) - P(Error) - P(In Play) × P(FBK Against | In Play), min-max scaled across all
+2025 Big West season serves. Higher = better for the server. M3 holdout AUC = `r val_metrics$auc`
 (train-only refit on first `r val_metrics$n_train` serves; deployed model trained on full season).
 Game state set to neutral (Set 2, tied score, away).*
