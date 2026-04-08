@@ -2,10 +2,11 @@ library(shiny)
 library(dplyr)
 library(ggplot2)
 library(ggrepel)
+library(here)
 
-serves <- readRDS("../data/serve_quality.rds")
-val_metrics <- if (file.exists("../data/validation_metrics.rds")) {
-  readRDS("../data/validation_metrics.rds")
+serves      <- readRDS(here("data", "serve_quality.rds"))
+val_metrics <- if (file.exists(here("data", "validation_metrics.rds"))) {
+  readRDS(here("data", "validation_metrics.rds"))
 } else NULL
 
 # Summarize for leaderboard — OOF columns throughout for consistency with stated methodology.
