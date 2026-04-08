@@ -38,7 +38,7 @@ ui <- fluidPage(
     sidebarPanel(
       # Leaderboard / chart controls — hidden on matchup tab
       conditionalPanel(
-        condition = "input.tabs !== 'Scouting Matchup'",
+        condition = "input.tabs !== 'scouting'",
         selectInput("team", "Filter by Team:",
                     choices  = c("All Teams", teams),
                     selected = "Cal Poly"),
@@ -47,7 +47,7 @@ ui <- fluidPage(
       ),
       # Scouting controls — only visible on matchup tab
       conditionalPanel(
-        condition = "input.tabs === 'Scouting Matchup'",
+        condition = "input.tabs === 'scouting'",
         selectInput("opponent", "Opponent:", choices = opponent_teams),
         sliderInput("min_receptions", "Min. Receptions:",
                     min = 10, max = 100, value = 20)
@@ -85,7 +85,7 @@ ui <- fluidPage(
           br(),
           plotOutput("scatter_plot", height = "500px")
         ),
-        tabPanel("Scouting Matchup",
+        tabPanel("Scouting Matchup", value = "scouting",
           br(),
           uiOutput("matchup_loading_msg"),
           h4("Opponent Receiver Targets"),
@@ -272,9 +272,15 @@ server <- function(input, output) {
       need(length(opp_receivers) > 0, "No opponent receivers meet the minimum threshold.")
     )
 
+    # Global fallback means computed from the full dataset — not from the small
+    # matchups frame, where columns can be mostly or entirely NA after joins.
+    mean_fbk   <- mean(serves$fbk_against[serves$in_play == 1], na.rm = TRUE)
+    mean_ace   <- mean(serves$ace,           na.rm = TRUE)
+    mean_error <- mean(serves$service_error, na.rm = TRUE)
+
     opp_rate_row  <- lr$opp %>% filter(opp_team == input$opponent)
     opp_fbk       <- if (nrow(opp_rate_row) == 1) opp_rate_row$opp_prior_fbk_rate
-                     else mean(serves$fbk_against[serves$in_play == 1], na.rm = TRUE)
+                     else mean_fbk
 
     matchups <- expand.grid(player = cp_servers, receiver = opp_receivers,
                             stringsAsFactors = FALSE) %>%
@@ -290,10 +296,15 @@ server <- function(input, output) {
         receiver_id        = as.integer(factor(receiver,       levels = art$receiver_levels)),
         opp_team_id        = as.integer(factor(input$opponent, levels = art$opp_levels))
       ) %>%
-      mutate(across(c(prior_ace_rate, prior_error_rate, prior_fbk_rate,
-                      receiver_prior_fbk_rate, opp_prior_fbk_rate,
-                      match_ace_rate, match_error_rate),
-                    ~replace(., is.na(.), mean(., na.rm = TRUE))))
+      mutate(
+        prior_ace_rate          = replace_na(prior_ace_rate,          mean_ace),
+        prior_error_rate        = replace_na(prior_error_rate,        mean_error),
+        prior_fbk_rate          = replace_na(prior_fbk_rate,          mean_fbk),
+        receiver_prior_fbk_rate = replace_na(receiver_prior_fbk_rate, mean_fbk),
+        opp_prior_fbk_rate      = replace_na(opp_prior_fbk_rate,      mean_fbk),
+        match_ace_rate          = replace_na(match_ace_rate,          mean_ace),
+        match_error_rate        = replace_na(match_error_rate,        mean_error)
+      )
 
     X_base <- as.matrix(matchups[, art$features_base])
     X_fbk  <- as.matrix(matchups[, art$features_fbk])
