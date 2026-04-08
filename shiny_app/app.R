@@ -4,16 +4,20 @@ library(ggplot2)
 library(ggrepel)
 
 serves <- readRDS("../data/serve_quality.rds")
+val_metrics <- if (file.exists("../data/validation_metrics.rds")) {
+  readRDS("../data/validation_metrics.rds")
+} else NULL
 
-# Summarize for leaderboard — p_fbk averaged over in-play serves only (conditional rate)
+# Summarize for leaderboard — OOF columns throughout for consistency with stated methodology.
+# quality_index is the 0-100 integer; serve_quality is the raw signed composite (~-0.3 to +0.3).
 leaderboard <- serves %>%
   group_by(player, serve_team) %>%
   summarise(
     n_serves    = n(),
-    avg_quality = round(mean(serve_quality), 3),
-    avg_p_ace   = round(mean(p_ace), 3),
-    avg_p_error = round(mean(p_error), 3),
-    avg_p_fbk   = round(mean(p_fbk[in_play == 1L], na.rm = TRUE), 3),
+    avg_quality = round(mean(quality_index)),
+    avg_p_ace   = round(mean(p_ace_oof), 3),
+    avg_p_error = round(mean(p_error_oof), 3),
+    avg_p_fbk   = round(mean(p_fbk_oof[in_play == 1L], na.rm = TRUE), 3),
     .groups = "drop"
   ) %>%
   filter(n_serves >= 10) %>%
@@ -33,7 +37,20 @@ ui <- fluidPage(
                   min = 10, max = 100, value = 10),
       hr(),
       p("Serve Quality = P(Ace) - P(Error) - P(In Play) \u00d7 P(FBK Against | In Play)"),
-      p("Higher = better serving performance.")
+      p("Higher = better serving performance."),
+      if (!is.null(val_metrics)) {
+        tagList(
+          hr(),
+          strong("OOF Validation AUC"),
+          tags$ul(
+            tags$li(paste("M1 P(Ace):", val_metrics$auc_m1)),
+            tags$li(paste("M2 P(Error):", val_metrics$auc_m2)),
+            tags$li(paste("M3 P(FBK):", val_metrics$auc_m3))
+          ),
+          p(em(paste0("Holdout: last 20 matches (", val_metrics$n_test, " serves)")),
+            style = "font-size:11px; color:#666;")
+        )
+      }
     ),
     
     mainPanel(
@@ -77,6 +94,7 @@ server <- function(input, output) {
   
   output$quality_plot <- renderPlot({
     df <- filtered() %>% arrange(desc(avg_quality))
+    if (input$team == "All Teams") df <- slice_head(df, n = 30)
     df$player <- factor(df$player, levels = df$player)
     cal_poly <- df$serve_team == "Cal Poly"
     
