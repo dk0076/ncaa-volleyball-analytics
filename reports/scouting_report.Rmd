@@ -41,9 +41,16 @@ if (!opponent %in% all_teams) {
 ```
 
 ```{r latest-rates}
-# Most recent prior rates per player (from their last recorded contest)
+# Most recent prior rates per player (from their last recorded contest).
+# Ordered by date_parsed rather than contestid — NCAA IDs are assigned
+# sequentially but monotonicity is not guaranteed by the API contract.
+contest_dates <- readRDS("../data/big_west_contests.rds") %>%
+  mutate(date_parsed = as.Date(date, "%m/%d/%Y")) %>%
+  select(contestid = contest, date_parsed)
+
 latest_server_rates <- serves %>%
-  arrange(contestid) %>%
+  left_join(contest_dates, by = "contestid") %>%
+  arrange(date_parsed) %>%
   group_by(player, serve_team) %>%
   slice_tail(n = 1) %>%
   ungroup() %>%
@@ -52,14 +59,16 @@ latest_server_rates <- serves %>%
 
 latest_receiver_rates <- serves %>%
   filter(in_play == 1, !is.na(receiver)) %>%
-  arrange(contestid) %>%
+  left_join(contest_dates, by = "contestid") %>%
+  arrange(date_parsed) %>%
   group_by(receiver, opp_team) %>%
   slice_tail(n = 1) %>%
   ungroup() %>%
   select(receiver, opp_team, receiver_prior_fbk_rate)
 
 latest_opp_rates <- serves %>%
-  arrange(contestid) %>%
+  left_join(contest_dates, by = "contestid") %>%
+  arrange(date_parsed) %>%
   group_by(opp_team) %>%
   slice_tail(n = 1) %>%
   ungroup() %>%
@@ -131,9 +140,9 @@ threats <- quality %>%
   summarise(
     Serves   = n(),
     Quality  = round(mean(quality_index)),
-    `P(Ace)` = round(mean(p_ace), 3),
-    `P(Err)` = round(mean(p_error), 3),
-    `P(FBK | In Play)` = round(mean(p_fbk[in_play == 1L]), 3),
+    `P(Ace)` = round(mean(p_ace_oof), 3),
+    `P(Err)` = round(mean(p_error_oof), 3),
+    `P(FBK | In Play)` = round(mean(p_fbk_oof[in_play == 1L], na.rm = TRUE), 3),
     .groups  = "drop"
   ) %>%
   filter(Serves >= 50) %>%

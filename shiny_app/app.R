@@ -8,6 +8,11 @@ library(xgboost)
 # Eager-loaded at startup — serve_quality.rds contains all feature columns
 # (it is a superset of serves_featured.rds) plus OOF predictions and quality_index.
 serves      <- readRDS(here("data", "serve_quality.rds"))
+# Contest dates for chronological ordering in latest_rates() — contest IDs are
+# assigned sequentially by the NCAA but monotonicity isn't guaranteed by the API.
+contest_dates <- readRDS(here("data", "big_west_contests.rds")) %>%
+  mutate(date_parsed = as.Date(date, "%m/%d/%Y")) %>%
+  select(contestid = contest, date_parsed)
 val_metrics <- if (file.exists(here("data", "validation_metrics.rds"))) {
   readRDS(here("data", "validation_metrics.rds"))
 } else NULL
@@ -183,7 +188,8 @@ server <- function(input, output) {
     req(artifacts())  # only compute after models.rds is loaded (tab is active)
 
     server_rates <- serves %>%
-      arrange(contestid) %>%
+      left_join(contest_dates, by = "contestid") %>%
+      arrange(date_parsed) %>%
       group_by(player, serve_team) %>%
       slice_tail(n = 1) %>%
       ungroup() %>%
@@ -192,14 +198,16 @@ server <- function(input, output) {
 
     receiver_rates <- serves %>%
       filter(in_play == 1, !is.na(receiver)) %>%
-      arrange(contestid) %>%
+      left_join(contest_dates, by = "contestid") %>%
+      arrange(date_parsed) %>%
       group_by(receiver, opp_team) %>%
       slice_tail(n = 1) %>%
       ungroup() %>%
       select(receiver, opp_team, receiver_prior_fbk_rate)
 
     opp_rates <- serves %>%
-      arrange(contestid) %>%
+      left_join(contest_dates, by = "contestid") %>%
+      arrange(date_parsed) %>%
       group_by(opp_team) %>%
       slice_tail(n = 1) %>%
       ungroup() %>%
@@ -248,6 +256,18 @@ server <- function(input, output) {
     validate(need(nrow(targets) > 0,
                   paste0("No receivers with \u2265 ", input$min_receptions,
                          " receptions vs. ", input$opponent, ".")))
+
+    # Verify receiver names matched across the join — a mismatch in opp_team
+    # string (e.g. "Cal St. Fullerton" vs "CSUF") would silently leave all
+    # receiver_prior_fbk_rate values as NA, falling back to raw_fbk_rate.
+    if (use_model_rates) {
+      known_receivers <- lr$receiver$receiver[lr$receiver$opp_team == input$opponent]
+      n_unmatched     <- sum(!targets$Player %in% known_receivers)
+      if (n_unmatched > 0)
+        warning(n_unmatched, " of ", nrow(targets), " receivers had no prior FBK rate match",
+                " for opponent '", input$opponent, "' — check opp_team string consistency.")
+    }
+
     targets
   })
 
