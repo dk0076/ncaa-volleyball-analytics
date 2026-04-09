@@ -310,9 +310,9 @@ server <- function(input, output) {
     matchups$p_fbk     <- predict(art$m3, xgb.DMatrix(X_fbk))
     matchups$p_in_play <- pmax(0, 1 - matchups$p_ace - matchups$p_error)
     quality_raw        <- matchups$p_ace - matchups$p_error - matchups$p_in_play * matchups$p_fbk
-    matchups$quality   <- as.integer(round(
+    matchups$quality   <- pmax(0L, pmin(100L, as.integer(round(
       100 * (quality_raw - art$quality_min) / (art$quality_max - art$quality_min)
-    ))
+    ))))
 
     matchups
   })

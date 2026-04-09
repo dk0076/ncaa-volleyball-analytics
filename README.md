@@ -136,9 +136,34 @@ entirely through prior rate features rather than integer-encoded IDs.
 Integer ID encoding is problematic for tree models — XGBoost treats
 arbitrary integers as continuous, losing the categorical structure. The
 prior rates computed chronologically in `05_prior_features.R` are
-target-encoded equivalents that are also interpretable. Removing
-`player_id` cost 0.011 AUC on M1; the cleaner, more generalizable
-feature set is the deliberate tradeoff.
+target-encoded equivalents that are also interpretable.
+
+**On prior rate smoothing (Bayesian shrinkage):** all prior rates use a
+Beta-Binomial posterior mean rather than a raw cumulative rate:
+
+```
+smoothed_rate = (cum_outcome + k × global_mean) / (cum_n + k)
+```
+
+The shrinkage parameter `k` is estimated per outcome type via empirical
+Bayes (method of moments on between-entity rate variance). Estimated
+values: k = 62 for ace rate, 28 for error rate, 50 for FBK rate. When
+`cum_n = 0` (first match) the formula returns the global mean exactly,
+replacing the previous hard imputation. As `cum_n` grows the smoothed
+rate converges to the empirical rate. Low-volume players are pulled
+toward the league mean in proportion to how noisy their estimates are.
+
+Within-match rates use the same formula with the player's own career
+prior as the shrinkage target rather than the global mean:
+
+```
+match_ace_rate = (match_aces_prior + k × prior_ace_rate) / (match_serves_prior + k)
+```
+
+This eliminated the hard switch between "raw within-match rate" and
+"career prior at serve 1" that was the weakest point in the previous
+feature engineering. After applying shrinkage, M1 AUC improved from
+0.549 to 0.588, exceeding the original integer-ID baseline (0.561).
 
 ### Modeling
 
@@ -151,14 +176,17 @@ the last 20 matches (3,304 serves).
 
 | Model | AUC | Baseline Logloss | Model Logloss |
 |---|---|---|---|
-| M1 — P(Ace) | 0.549 | 0.228 | 0.227 |
-| M2 — P(Service Error) | 0.599 | 0.325 | 0.320 |
-| M3 — P(FBK Against) | 0.571 | 0.664 | 0.657 |
+| M1 — P(Ace) | 0.588 | 0.228 | 0.225 |
+| M2 — P(Service Error) | 0.606 | 0.325 | 0.319 |
+| M3 — P(FBK Against) | 0.564 | 0.664 | 0.658 |
 
 AUC values are modest but consistent with the signal available from
 play-by-play data alone — no tracking inputs (serve location, speed,
 type) are available at the NCAA level. All three models beat the
-predict-the-mean baseline.
+predict-the-mean baseline. M1 in particular benefits from Bayesian
+shrinkage on within-match rates, which smoothly handles the high-noise
+early-match regime rather than switching hard between the raw rate and
+the career prior.
 
 ## Key Findings
 
@@ -170,18 +198,22 @@ Top SHAP features on the holdout set (mean |SHAP|, M3):
 
 | Feature | Mean \|SHAP\| |
 |---|---|
-| `opp_prior_fbk_rate` (team) | 0.065 |
-| `score_diff` | 0.044 |
-| `is_home` | 0.026 |
-| `receiver_prior_fbk_rate` (individual) | 0.025 |
-| `opp_prior_error_rate` | 0.023 |
-| `prior_fbk_rate` (server) | 0.010 |
+| `opp_prior_fbk_rate` (team) | 0.067 |
+| `score_diff` | 0.041 |
+| `is_home` | 0.022 |
+| `opp_prior_error_rate` | 0.022 |
+| `opp_prior_ace_rate` | 0.021 |
+| `receiver_prior_fbk_rate` (individual) | 0.020 |
+| `prior_fbk_rate` (server) | 0.009 |
 
 Team-level receiving tendency (`opp_prior_fbk_rate`) is the single
 strongest predictor. Individual receiver identity, once represented as a
 smoothed prior rate rather than an integer ID, contributes meaningful
-additional signal but is not dominant. Server features contribute less
-than half the signal of receiver features.
+additional signal but is not dominant. Opponent team ace and error rates
+contribute at roughly equal magnitude to individual receiver rate —
+reflecting that team-level receiving quality is a stronger predictor
+than any single player's tendencies. Server features contribute less
+than half the signal of receiver-side features.
 
 **What this means:** FBK outcomes are primarily determined by who
 receives the serve, not who serves it. A server whose opponents concede
@@ -292,8 +324,6 @@ loads model data on first access.
     layer currently invisible in PBP data
 -   **Multiple seasons** would stabilize ratings for low-volume players
     and enable year-over-year tracking
--   **Bayesian shrinkage** on prior rates would handle first-match
-    imputation more principally than the current global mean fallback
 -   **Multinomial classifier** over {ace, error, in-play} would enforce
     the simplex constraint and remove the need to clamp
     `p_ace + p_error` — the current independent binary classifiers are

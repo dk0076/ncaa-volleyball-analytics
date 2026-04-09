@@ -236,9 +236,9 @@ if (length(cp_servers) == 0 || length(opp_receivers) == 0) {
   matchups$p_fbk     <- predict(artifacts$m3, xgb.DMatrix(X_fbk))
   matchups$p_in_play <- pmax(0, 1 - matchups$p_ace - matchups$p_error)
   quality_raw        <- matchups$p_ace - matchups$p_error - matchups$p_in_play * matchups$p_fbk
-  matchups$quality   <- as.integer(round(
+  matchups$quality   <- pmax(0L, pmin(100L, as.integer(round(
     100 * (quality_raw - artifacts$quality_min) / (artifacts$quality_max - artifacts$quality_min)
-  ))
+  ))))
 
   # Pivot to wide matrix
   matrix_wide <- matchups %>%
