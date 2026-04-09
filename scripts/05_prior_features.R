@@ -36,7 +36,10 @@ mean_fbk   <- mean(serves$fbk_against[serves$in_play == 1], na.rm = TRUE)
 # players are pulled toward the league mean more strongly than high-volume ones.
 shrinkage_k <- function(totals_n, totals_outcome, global_mean, min_n = 20) {
   keep     <- totals_n >= min_n
-  if (sum(keep) < 5) return(50)           # sparse fallback
+  # Sparse fallback: k = 50 is interpretable as "weight the prior as if you had
+  # seen 50 observations" — a round number roughly equal to the median per-player
+  # serve count. It is the only non-data-driven value in this function.
+  if (sum(keep) < 5) return(50)
   rates    <- totals_outcome[keep] / totals_n[keep]
   n_bar    <- mean(totals_n[keep])
   var_obs  <- var(rates)
@@ -57,17 +60,28 @@ receiver_totals <- serves %>%
   group_by(receiver) %>%
   summarise(n_ip = n(), n_fbk = sum(fbk_against), .groups = "drop")
 
+# k_fbk: between-receiver variance — applied to receiver_prior_fbk_rate and
+# server prior_fbk_rate (servers are also receivers in this dataset).
 k_fbk <- shrinkage_k(receiver_totals$n_ip, receiver_totals$n_fbk, mean_fbk)
 
 team_totals <- serves %>%
   group_by(opp_team) %>%
   summarise(n = n(), n_ace = sum(ace), n_error = sum(service_error), .groups = "drop")
 
-k_opp_ace   <- shrinkage_k(team_totals$n, team_totals$n_ace,   mean_ace,   min_n = 5)
-k_opp_error <- shrinkage_k(team_totals$n, team_totals$n_error, mean_error, min_n = 5)
+team_totals_fbk <- serves %>%
+  filter(in_play == 1) %>%
+  group_by(opp_team) %>%
+  summarise(n_ip = n(), n_fbk = sum(fbk_against), .groups = "drop")
+
+# k_opp_fbk estimated from between-team FBK variance — separate from k_fbk
+# (receiver level) because teams aggregate more observations and the
+# between-entity variance structure differs from individual receivers.
+k_opp_fbk   <- shrinkage_k(team_totals_fbk$n_ip, team_totals_fbk$n_fbk, mean_fbk, min_n = 5)
+k_opp_ace   <- shrinkage_k(team_totals$n, team_totals$n_ace,             mean_ace,   min_n = 5)
+k_opp_error <- shrinkage_k(team_totals$n, team_totals$n_error,           mean_error, min_n = 5)
 
 cat("Shrinkage k — ace:", k_ace, "| error:", k_error, "| fbk:", k_fbk,
-    "| opp_ace:", k_opp_ace, "| opp_error:", k_opp_error, "\n")
+    "| opp_fbk:", k_opp_fbk, "| opp_ace:", k_opp_ace, "| opp_error:", k_opp_error, "\n")
 
 # ── Server prior ace / error rates (all serves) ───────────────────────────────
 player_contest_stats <- serves %>%
@@ -127,7 +141,7 @@ opp_team_fbk <- serves %>%
   mutate(
     cum_n_ip = cumsum(n_ip) - n_ip,
     cum_fbk  = cumsum(n_fbk) - n_fbk,
-    opp_prior_fbk_rate = (cum_fbk + k_fbk * mean_fbk) / (cum_n_ip + k_fbk)
+    opp_prior_fbk_rate = (cum_fbk + k_opp_fbk * mean_fbk) / (cum_n_ip + k_opp_fbk)
   ) %>%
   ungroup() %>%
   select(opp_team, contestid, opp_prior_fbk_rate)
@@ -171,6 +185,10 @@ serves_featured <- serves %>%
     # Within-match rates — shrink toward player's own career prior rather than
     # hard-switching at serve 1. When match_serves_prior == 0 this returns
     # prior_ace_rate exactly; as match volume grows it converges to the raw rate.
+    # Note: k_ace / k_error were estimated from between-player career variance,
+    # not between-match within-player variance — the latter is typically smaller,
+    # meaning these k values may over-shrink slightly in the within-match context.
+    # In practice the effect is minor given the small within-match sample sizes.
     match_ace_rate   = (match_aces_prior   + k_ace   * prior_ace_rate)   / (match_serves_prior + k_ace),
     match_error_rate = (match_errors_prior + k_error * prior_error_rate) / (match_serves_prior + k_error)
   ) %>%
