@@ -199,12 +199,11 @@ server <- function(input, output) {
       select(receiver, opp_team, receiver_prior_fbk_rate)
 
     opp_rates <- serves %>%
-      filter(in_play == 1) %>%
       arrange(contestid) %>%
       group_by(opp_team) %>%
       slice_tail(n = 1) %>%
       ungroup() %>%
-      select(opp_team, opp_prior_fbk_rate)
+      select(opp_team, opp_prior_fbk_rate, opp_prior_ace_rate, opp_prior_error_rate)
 
     list(server = server_rates, receiver = receiver_rates, opp = opp_rates)
   })
@@ -277,30 +276,28 @@ server <- function(input, output) {
     mean_ace   <- mean(serves$ace,           na.rm = TRUE)
     mean_error <- mean(serves$service_error, na.rm = TRUE)
 
-    opp_rate_row  <- lr$opp %>% filter(opp_team == input$opponent)
-    opp_fbk       <- if (nrow(opp_rate_row) == 1) opp_rate_row$opp_prior_fbk_rate
-                     else mean_fbk
+    opp_rate_row <- lr$opp %>% filter(opp_team == input$opponent)
 
     matchups <- expand.grid(player = cp_servers, receiver = opp_receivers,
                             stringsAsFactors = FALSE) %>%
       left_join(lr$server %>% filter(serve_team == "Cal Poly"), by = "player") %>%
-      left_join(lr$receiver %>% filter(opp_team == input$opponent),  by = "receiver") %>%
+      left_join(lr$receiver %>% filter(opp_team == input$opponent), by = "receiver") %>%
       mutate(
-        opp_prior_fbk_rate = opp_fbk,
-        set_num            = 2L,
-        score_diff         = 0L,
-        is_home            = 0L,
-        is_late_set        = 0L,
-        player_id          = as.integer(factor(player,         levels = art$player_levels)),
-        receiver_id        = as.integer(factor(receiver,       levels = art$receiver_levels)),
-        opp_team_id        = as.integer(factor(input$opponent, levels = art$opp_levels))
+        # Neutral game state — set 2, tied score, away
+        set_num    = 2L,
+        score_diff = 0L,
+        is_home    = 0L,
+        is_late_set = 0L,
+        # Opponent rates: use latest prior from lr$opp; fall back to global mean
+        opp_prior_fbk_rate   = if (nrow(opp_rate_row) == 1) opp_rate_row$opp_prior_fbk_rate   else mean_fbk,
+        opp_prior_ace_rate   = if (nrow(opp_rate_row) == 1) opp_rate_row$opp_prior_ace_rate   else mean_ace,
+        opp_prior_error_rate = if (nrow(opp_rate_row) == 1) opp_rate_row$opp_prior_error_rate else mean_error
       ) %>%
       mutate(
         prior_ace_rate          = coalesce(prior_ace_rate,          mean_ace),
         prior_error_rate        = coalesce(prior_error_rate,        mean_error),
         prior_fbk_rate          = coalesce(prior_fbk_rate,          mean_fbk),
         receiver_prior_fbk_rate = coalesce(receiver_prior_fbk_rate, mean_fbk),
-        opp_prior_fbk_rate      = coalesce(opp_prior_fbk_rate,      mean_fbk),
         match_ace_rate          = coalesce(match_ace_rate,          mean_ace),
         match_error_rate        = coalesce(match_error_rate,        mean_error)
       )

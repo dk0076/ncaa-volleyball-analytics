@@ -9,30 +9,22 @@ stopifnot("Run 05_prior_features.R before this script" =
 serves       <- readRDS("data/serves_featured.rds")
 bwc_contests <- readRDS("data/big_west_contests.rds")
 
-# Factor encoding — build levels from full dataset so 06_validation.R stays consistent
-player_levels   <- levels(factor(serves$player))
-receiver_levels <- levels(factor(serves$receiver))
-opp_levels      <- levels(factor(serves$opp_team))
-
-serves <- serves %>%
-  mutate(
-    player_id   = as.integer(factor(player,   levels = player_levels)),
-    receiver_id = as.integer(factor(receiver, levels = receiver_levels)),
-    opp_team_id = as.integer(factor(opp_team, levels = opp_levels))
-  )
-
-# Features for ace/error models (all serves — receiver may be NA for aces/errors)
+# Features for ace/error models (all serves — receiver may be NA for aces/errors).
+# Integer ID columns removed: prior rate features are already target-encoded
+# per-player/team rates computed chronologically in 05_prior_features.R.
+# opp_prior_ace_rate / opp_prior_error_rate replace opp_team_id for M1/M2.
 features_base <- c(
-  "player_id", "opp_team_id", "set_num", "score_diff",
-  "is_home", "is_late_set",
+  "set_num", "score_diff", "is_home", "is_late_set",
   "prior_ace_rate", "prior_error_rate",
+  "opp_prior_ace_rate", "opp_prior_error_rate",
   "match_ace_rate", "match_error_rate"
 )
 
-# Features for FBK model (in-play serves only — receiver always present)
+# Features for FBK model (in-play serves only — receiver always present).
+# receiver_prior_fbk_rate and opp_prior_fbk_rate replace receiver_id / opp_team_id.
 features_fbk <- c(
   features_base,
-  "receiver_id", "prior_fbk_rate",
+  "prior_fbk_rate",
   "receiver_prior_fbk_rate", "opp_prior_fbk_rate"
 )
 
@@ -191,13 +183,10 @@ print(leaderboard)
 saveRDS(
   list(
     m1 = m1, m2 = m2, m3 = m3,
-    features_base   = features_base,
-    features_fbk    = features_fbk,
-    player_levels   = player_levels,
-    receiver_levels = receiver_levels,
-    opp_levels      = opp_levels,
-    quality_min     = quality_min,
-    quality_max     = quality_max
+    features_base = features_base,
+    features_fbk  = features_fbk,
+    quality_min   = quality_min,
+    quality_max   = quality_max
   ),
   "data/models.rds"
 )

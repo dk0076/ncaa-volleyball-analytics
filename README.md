@@ -20,8 +20,9 @@ server, or the receiver?**
 
 -   **Source:** NCAA stats website via the `ncaavolleyballr` R package
 -   **Scope:** All matches involving Big West Conference women's
-    volleyball teams, 2025 season
--   **Volume:** 225 matches, 44,034 serves, 257,265 play-by-play events
+    volleyball teams plus major West Coast programs (former Pac-12,
+    WCC), 2025 season
+-   **Volume:** 542 matches, 87,219 serves, 596,014 play-by-play events
 -   **Storage:** DuckDB local analytical database
 
 ## Metrics
@@ -50,13 +51,18 @@ server, or the receiver?**
     rate
 -   **opp_prior_fbk_rate** — receiving team's overall historical FBK
     rate
+-   **opp_prior_ace_rate** — historical ace rate when serving against
+    this team (captures opponent serve-receive quality for M1/M2)
+-   **opp_prior_error_rate** — historical service error rate when
+    serving against this team
 
 ### Game State Features
 
 -   **score_diff** — server score minus receiver score at time of serve
 -   **set_num** — current set number
 -   **is_home** — whether the serving team is at home
--   **is_late_set** — whether either team's score is ≥ 20
+-   **is_late_set** — whether either team's score is ≥ 20 (≥ 12 in set
+    5)
 
 ### Model Outputs (XGBoost)
 
@@ -71,12 +77,7 @@ server, or the receiver?**
 -   **FBK Rate (receivers)** — fraction of receptions resulting in FBK
     against the server; lower = weaker passer = serve target
 -   **Serve Quality Index (servers)** — average predicted serve quality
-    across all serves
--   **Threat (0-100)** — rescales Serve Quality to a 0–100 range within
-    the opponent's roster; 100 = biggest threat to Cal Poly (highest
-    quality = most dangerous server), 0 = least threatening; relative
-    ranking only, not comparable across opponents;
-    `Threat = 100 × (Quality - min) / (max - min)`
+    across all serves, min-max scaled to 0–100 across the full season
 -   **Matchup Quality** — serve quality predicted for a specific server
     × receiver pairing at neutral game state (Set 2, tied score, away)
 
@@ -86,7 +87,7 @@ server, or the receiver?**
 
 Each serve results in one of three mutually exclusive outcomes:
 
-```         
+```
 P(Ace)                    — serve lands untouched
 P(Error)                  — serve out or into net
 P(FBK Against | In Play)  — opponent kills on first ball after reception
@@ -94,79 +95,98 @@ P(FBK Against | In Play)  — opponent kills on first ball after reception
 
 ### Serve Quality Index
 
-```         
+```
 Serve Quality = P(Ace) - P(Error) - P(In Play) x P(FBK Against | In Play)
 ```
 
-Higher scores indicate more effective serving. All scores are negative
-in practice because FBK against probability (\~0.29) dominates ace
-probability (\~0.057) — scores are meaningful relatively, not
-absolutely.
+Higher scores indicate more effective serving. The formula uses unit
+weights: ace (+1), error (−1), and FBK against (−1 conditional on
+in-play) are treated as equal in magnitude. In practice an ace ends the
+rally entirely while FBK raises the opponent's rally-win probability
+rather than guaranteeing a point, so this slightly overvalues aces
+relative to FBK avoidance. A calibrated version would weight by
+empirical points-won probability per outcome; this is the unit-weight
+baseline.
 
 ### Feature Engineering
 
 All player-level features are computed from prior matches only to
-prevent data leakage. Features split by model:
+prevent data leakage. Exclusive cumulative sums (`cumsum(x) - x`) are
+used throughout so no information from the current contest enters the
+feature values.
 
-**Ace and error models (all serves):** - `prior_ace_rate` — server's
-historical ace rate in all preceding matches - `prior_error_rate` —
-server's historical error rate in all preceding matches -
-`match_ace_rate` — server's ace rate so far in the current match -
-`match_error_rate` — server's error rate so far in the current match -
-`score_diff` — server's score minus receiver's score - `set_num` —
-current set number - `is_home` — whether the serving team is at home -
-`is_late_set` — whether either team's score is ≥ 20
+**Ace and error models (all serves):**
 
-**FBK model (in-play serves only):** - All features above, plus: -
-`receiver_id` — identity of the player receiving the serve -
-`receiver_prior_fbk_rate` — receiver's historical FBK concession rate -
-`prior_fbk_rate` — server's historical FBK rate against -
-`opp_prior_fbk_rate` — receiving team's historical FBK rate
+-   `prior_ace_rate`, `prior_error_rate` — server's historical rates
+-   `opp_prior_ace_rate`, `opp_prior_error_rate` — historical rates when
+    serving against this opponent (replaces integer team ID)
+-   `match_ace_rate`, `match_error_rate` — within-match rolling rates
+-   `score_diff`, `set_num`, `is_home`, `is_late_set` — game state
+
+**FBK model (in-play serves only):**
+
+-   All features above, plus:
+-   `prior_fbk_rate` — server's historical FBK rate against
+-   `receiver_prior_fbk_rate` — receiver's historical FBK concession
+    rate
+-   `opp_prior_fbk_rate` — receiving team's historical FBK rate
+
+**On feature encoding:** player and team identity is represented
+entirely through prior rate features rather than integer-encoded IDs.
+Integer ID encoding is problematic for tree models — XGBoost treats
+arbitrary integers as continuous, losing the categorical structure. The
+prior rates computed chronologically in `05_prior_features.R` are
+target-encoded equivalents that are also interpretable. Removing
+`player_id` cost 0.011 AUC on M1; the cleaner, more generalizable
+feature set is the deliberate tradeoff.
 
 ### Modeling
 
 Three XGBoost binary classifiers, one per outcome. Hyperparameters tuned
 with 5-fold cross-validation and early stopping (up to 500 rounds,
-`eta = 0.05`, `max_depth = 4`). Trained on 205 matches (\~34,000 in-play
-serves) and validated on a chronological holdout of 20 matches (\~3,700
-serves).
+`eta = 0.05`, `max_depth = 4`). Validated on a chronological holdout of
+the last 20 matches (3,304 serves).
 
 ### Validation Results
 
-| Metric           | Value  |
-|------------------|--------|
-| Baseline logloss | 0.6060 |
-| Model logloss    | 0.5483 |
-| Improvement      | 0.0577 |
-| AUC              | 0.630  |
+| Model | AUC | Baseline Logloss | Model Logloss |
+|---|---|---|---|
+| M1 — P(Ace) | 0.549 | 0.228 | 0.227 |
+| M2 — P(Service Error) | 0.599 | 0.325 | 0.320 |
+| M3 — P(FBK Against) | 0.571 | 0.664 | 0.657 |
 
-Out-of-sample AUC of 0.630 indicates meaningful predictive power from
-play-by-play data alone, without any tracking inputs.
+AUC values are modest but consistent with the signal available from
+play-by-play data alone — no tracking inputs (serve location, speed,
+type) are available at the NCAA level. All three models beat the
+predict-the-mean baseline.
 
 ## Key Findings
 
-**Receiver identity drives FBK outcomes far more than server skill.**
+**Opponent team receiving tendency is the dominant predictor of FBK
+outcomes; individual receiver identity adds signal beyond that but is
+secondary.**
 
-XGBoost feature importance on the held-out test set:
+Top SHAP features on the holdout set (mean |SHAP|, M3):
 
-| Feature                   | Gain  |
-|---------------------------|-------|
-| `receiver_id`             | 81.6% |
-| `receiver_prior_fbk_rate` | 4.9%  |
-| `opp_prior_fbk_rate`      | 3.3%  |
-| `player_id` (server)      | 2.1%  |
-| `prior_fbk_rate` (server) | 1.5%  |
-| All other features        | 6.6%  |
+| Feature | Mean \|SHAP\| |
+|---|---|
+| `opp_prior_fbk_rate` (team) | 0.065 |
+| `score_diff` | 0.044 |
+| `is_home` | 0.026 |
+| `receiver_prior_fbk_rate` (individual) | 0.025 |
+| `opp_prior_error_rate` | 0.023 |
+| `prior_fbk_rate` (server) | 0.010 |
 
-The receiver alone accounts for 81.6% of model gain. Server identity and
-historical rates contribute less than 4% combined. Game state features
-(`set_num`, `is_late_set`, `is_home`) are near zero.
+Team-level receiving tendency (`opp_prior_fbk_rate`) is the single
+strongest predictor. Individual receiver identity, once represented as a
+smoothed prior rate rather than an integer ID, contributes meaningful
+additional signal but is not dominant. Server features contribute less
+than half the signal of receiver features.
 
-**What this means:** a first-ball kill is primarily determined by who
-receives the serve, not who serves it. This has direct implications for
-how serve quality should be interpreted — a server whose opponents
-concede high FBK rates may be benefiting from targeting weak passers
-rather than generating serves that are inherently difficult to handle.
+**What this means:** FBK outcomes are primarily determined by who
+receives the serve, not who serves it. A server whose opponents concede
+high FBK rates may be benefiting from targeting weak passers rather than
+generating serves that are inherently difficult to handle.
 
 **The Serve Quality Index functions as a receiver-adjusted server
 rating.** Players who consistently face weak passers are penalized
@@ -188,23 +208,25 @@ volleyball equivalent of Statcast does not yet exist at the NCAA level.
 
 ## Project Structure
 
-```         
+```
 scripts/
   01_data_pull.R           # Pull all Big West schedules and PBP via ncaavolleyballr
   02_sql_explore.R         # SQL analytical queries against DuckDB
   03_feature_engineering.R # Rally-level feature construction (receiver, home/away, etc.)
+  05_prior_features.R      # Rolling per-player prior rates (no data leakage) — run before 04
   04_model.R               # XGBoost training, CV tuning, leaderboard, model artifacts
-  05_prior_features.R      # Rolling per-player prior rates (no data leakage)
-  06_validation.R          # Chronological holdout validation + feature importance
+  06_validation.R          # Chronological holdout validation + SHAP feature importance
 shiny_app/
   app.R                    # Interactive serve quality dashboard
+reports/
+  scouting_report.Rmd      # Parameterized pre-match scouting report
 data/                      # Not tracked in git — generated by scripts
-  volleyball.duckdb        # Raw PBP data (257k rows)
+  volleyball.duckdb        # Raw PBP data
   big_west_contests.rds    # Contest metadata with dates (output of 01)
   serves_clean.rds         # Serve-level dataset with receiver and game state (output of 03)
   serves_featured.rds      # With rolling prior rates for all players (output of 05)
   serve_quality.rds        # Model predictions and quality scores (output of 04)
-  models.rds               # Trained models and factor encodings (output of 04)
+  models.rds               # Trained models and scaling parameters (output of 04)
 ```
 
 ## Reproducing the Data
@@ -222,25 +244,24 @@ dir.create("data", showWarnings = FALSE)
 **2. Run scripts in order**
 
 ``` r
-source("scripts/01_data_pull.R")   # live API pull — ~5 sec per match, expect 15–20 min
-source("scripts/02_sql_explore.R")
+source("scripts/01_data_pull.R")   # live API pull — ~5 sec per match, expect 45–60 min
 source("scripts/03_feature_engineering.R")
 source("scripts/05_prior_features.R")  # must run before 04
 source("scripts/04_model.R")
 source("scripts/06_validation.R")
 ```
 
-Script 01 builds the contest list automatically from all Big West team
-schedules via `ncaavolleyballr`. Skip it if `data/volleyball.duckdb`
-already exists.
+Script 01 builds the contest list automatically from all team schedules
+via `ncaavolleyballr`. Skip it if `data/volleyball.duckdb` already
+exists.
 
 **3. Generate a scouting report**
 
 ``` r
 rmarkdown::render(
   "reports/scouting_report.Rmd",
-  params = list(opponent = "UC Santa Barbara"),  # replace with any Big West team
-  output_file = "scouting_UCSB.pdf"             # output lands in reports/
+  params = list(opponent = "UC Santa Barbara"),  # replace with any team in the dataset
+  output_file = "scouting_UCSB.html"
 )
 ```
 
@@ -251,17 +272,15 @@ serves <- readRDS("data/serves_featured.rds")
 sort(unique(c(serves$serve_team, serves$opp_team)))
 ```
 
-Requires LaTeX for PDF output. If not installed:
-`tinytex::install_tinytex()`
-
 **4. Launch the app**
 
 ``` r
 shiny::runApp("shiny_app")
 ```
 
-The app defaults to Cal Poly. Use the team dropdown to view any
-conference team or select "All Teams" for the full leaderboard.
+The app defaults to Cal Poly. Use the team dropdown to view any team or
+select "All Teams" for the full leaderboard. The Scouting Matchup tab
+loads model data on first access.
 
 ## Limitations and Future Work
 
@@ -273,13 +292,17 @@ conference team or select "All Teams" for the full leaderboard.
     layer currently invisible in PBP data
 -   **Multiple seasons** would stabilize ratings for low-volume players
     and enable year-over-year tracking
--   **Bayesian shrinkage** would handle first-match imputation more
-    principally than the current global mean fallback
+-   **Bayesian shrinkage** on prior rates would handle first-match
+    imputation more principally than the current global mean fallback
+-   **Multinomial classifier** over {ace, error, in-play} would enforce
+    the simplex constraint and remove the need to clamp
+    `p_ace + p_error` — the current independent binary classifiers are
+    not architecturally constrained to sum to ≤ 1
 -   **Reception quality grades** (if available via
     DataVolley/VolleyMetrics) would replace the binary FBK outcome with
     a continuous reception quality score
 
 ## Author
 
-Drew King — Statistics B.S., Cal Poly SLO Sports Analytics \|
+Drew King — Statistics B.S., Cal Poly SLO Sports Analytics |
 github.com/dk0076

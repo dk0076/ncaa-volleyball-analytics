@@ -11,13 +11,6 @@ serves_featured  <- readRDS("data/serves_featured.rds")
 all_contests_df  <- readRDS("data/big_west_contests.rds")
 model_artifacts  <- readRDS("data/models.rds")
 
-# Consistent factor encoding using levels saved by 04_model.R
-serves_featured <- serves_featured %>%
-  mutate(
-    player_id   = as.integer(factor(player,   levels = model_artifacts$player_levels)),
-    receiver_id = as.integer(factor(receiver, levels = model_artifacts$receiver_levels)),
-    opp_team_id = as.integer(factor(opp_team, levels = model_artifacts$opp_levels))
-  )
 
 # Chronological contest order
 contest_order <- all_contests_df %>%

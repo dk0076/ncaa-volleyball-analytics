@@ -77,6 +77,24 @@ opp_team_fbk <- serves %>%
   ungroup() %>%
   select(opp_team, contestid, opp_prior_fbk_rate)
 
+# ── Opponent team prior ace / error rates (all serves against this team) ──────
+# Captures how good this opponent's serve receive is — teams ace more often
+# against weaker receivers. Replaces the integer opp_team_id in M1/M2.
+opp_team_ace_error <- serves %>%
+  group_by(opp_team, contestid, contest_idx) %>%
+  summarise(n = n(), n_ace = sum(ace), n_error = sum(service_error), .groups = "drop") %>%
+  arrange(opp_team, contest_idx) %>%
+  group_by(opp_team) %>%
+  mutate(
+    cum_n     = cumsum(n)       - n,
+    cum_ace   = cumsum(n_ace)   - n_ace,
+    cum_error = cumsum(n_error) - n_error,
+    opp_prior_ace_rate   = ifelse(cum_n > 0, cum_ace   / cum_n, NA_real_),
+    opp_prior_error_rate = ifelse(cum_n > 0, cum_error / cum_n, NA_real_)
+  ) %>%
+  ungroup() %>%
+  select(opp_team, contestid, opp_prior_ace_rate, opp_prior_error_rate)
+
 # ── Imputation means ──────────────────────────────────────────────────────────
 mean_ace   <- mean(serves$ace)
 mean_error <- mean(serves$service_error)
@@ -84,16 +102,19 @@ mean_fbk   <- mean(serves$fbk_against[serves$in_play == 1], na.rm = TRUE)
 
 # ── Combine all features ──────────────────────────────────────────────────────
 serves_featured <- serves %>%
-  left_join(server_prior,  by = c("player", "contestid")) %>%
-  left_join(server_fbk,    by = c("player", "contestid")) %>%
-  left_join(receiver_fbk,  by = c("receiver", "contestid")) %>%
-  left_join(opp_team_fbk,  by = c("opp_team", "contestid")) %>%
+  left_join(server_prior,      by = c("player",   "contestid")) %>%
+  left_join(server_fbk,        by = c("player",   "contestid")) %>%
+  left_join(receiver_fbk,      by = c("receiver", "contestid")) %>%
+  left_join(opp_team_fbk,      by = c("opp_team", "contestid")) %>%
+  left_join(opp_team_ace_error, by = c("opp_team", "contestid")) %>%
   mutate(
     prior_ace_rate          = ifelse(is.na(prior_ace_rate),          mean_ace,   prior_ace_rate),
     prior_error_rate        = ifelse(is.na(prior_error_rate),        mean_error, prior_error_rate),
     prior_fbk_rate          = ifelse(is.na(prior_fbk_rate),          mean_fbk,   prior_fbk_rate),
     receiver_prior_fbk_rate = ifelse(is.na(receiver_prior_fbk_rate), mean_fbk,   receiver_prior_fbk_rate),
     opp_prior_fbk_rate      = ifelse(is.na(opp_prior_fbk_rate),      mean_fbk,   opp_prior_fbk_rate),
+    opp_prior_ace_rate      = ifelse(is.na(opp_prior_ace_rate),      mean_ace,   opp_prior_ace_rate),
+    opp_prior_error_rate    = ifelse(is.na(opp_prior_error_rate),    mean_error, opp_prior_error_rate),
     # Within-match rates — impute first serve of match with career prior
     match_ace_rate   = ifelse(
       match_serves_prior > 0,
