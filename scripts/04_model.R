@@ -126,11 +126,21 @@ serves <- serves %>%
   left_join(in_play %>% select(row_id, p_fbk_oof), by = "row_id") %>%
   mutate(
     p_fbk_oof     = ifelse(is.na(p_fbk_oof), 0, p_fbk_oof),
+    # M1 and M2 are trained independently (binary:logistic), so their probabilities
+    # are not constrained to sum to <= 1. pmax(0, ...) clamps the residual.
     p_in_play_oof = pmax(0, 1 - p_ace_oof - p_error_oof),
-    # Safety clamp: M1/M2 are independent, so p_ace + p_error could theoretically
-    # exceed 1. Verified to not occur on current dataset (0/32k rows).
+    # Serve quality: expected-outcome composite with unit weights.
+    # Implicit assumption: ace (+1), error (-1), and FBK against (-1 conditional on
+    # in-play) are treated as equal in magnitude. In practice an ace ends the rally
+    # entirely, while FBK raises the opponent's rally-win probability rather than
+    # guaranteeing a point — so this slightly overvalues aces relative to FBK
+    # avoidance. A calibrated version would weight by empirical points-won probability
+    # per outcome; this formula is the unit-weight baseline.
     serve_quality = p_ace_oof - p_error_oof - p_in_play_oof * p_fbk_oof
   )
+
+n_clamped <- sum((1 - serves$p_ace_oof - serves$p_error_oof) < 0)
+if (n_clamped > 0) warning(n_clamped, " serves had p_ace_oof + p_error_oof > 1 before clamping.")
 
 # Global 0-100 quality index for interpretable display.
 # Saved to models.rds so scouting report applies identical scaling to new predictions.

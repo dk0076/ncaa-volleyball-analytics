@@ -110,13 +110,13 @@ server <- function(input, output) {
   artifacts <- reactiveVal(NULL)
 
   observeEvent(input$tabs, {
-    if (input$tabs == "Scouting Matchup" && is.null(artifacts())) {
+    if (input$tabs == "scouting" && is.null(artifacts())) {
       artifacts(readRDS(here("data", "models.rds")))
     }
   })
 
   output$matchup_loading_msg <- renderUI({
-    if (input$tabs == "Scouting Matchup" && is.null(artifacts())) {
+    if (input$tabs == "scouting" && is.null(artifacts())) {
       p("Loading model data...", style = "color:#666; font-style:italic;")
     }
   })
@@ -231,8 +231,7 @@ server <- function(input, output) {
       ) %>%
       mutate(
         fbk_rate = round(
-          if (use_model_rates) coalesce(receiver_prior_fbk_rate, raw_fbk_rate)
-          else raw_fbk_rate,
+          ifelse(use_model_rates, coalesce(receiver_prior_fbk_rate, raw_fbk_rate), raw_fbk_rate),
           3
         )
       ) %>%
@@ -297,13 +296,13 @@ server <- function(input, output) {
         opp_team_id        = as.integer(factor(input$opponent, levels = art$opp_levels))
       ) %>%
       mutate(
-        prior_ace_rate          = replace_na(prior_ace_rate,          mean_ace),
-        prior_error_rate        = replace_na(prior_error_rate,        mean_error),
-        prior_fbk_rate          = replace_na(prior_fbk_rate,          mean_fbk),
-        receiver_prior_fbk_rate = replace_na(receiver_prior_fbk_rate, mean_fbk),
-        opp_prior_fbk_rate      = replace_na(opp_prior_fbk_rate,      mean_fbk),
-        match_ace_rate          = replace_na(match_ace_rate,          mean_ace),
-        match_error_rate        = replace_na(match_error_rate,        mean_error)
+        prior_ace_rate          = coalesce(prior_ace_rate,          mean_ace),
+        prior_error_rate        = coalesce(prior_error_rate,        mean_error),
+        prior_fbk_rate          = coalesce(prior_fbk_rate,          mean_fbk),
+        receiver_prior_fbk_rate = coalesce(receiver_prior_fbk_rate, mean_fbk),
+        opp_prior_fbk_rate      = coalesce(opp_prior_fbk_rate,      mean_fbk),
+        match_ace_rate          = coalesce(match_ace_rate,          mean_ace),
+        match_error_rate        = coalesce(match_error_rate,        mean_error)
       )
 
     X_base <- as.matrix(matchups[, art$features_base])
@@ -387,14 +386,14 @@ server <- function(input, output) {
       slice_head(n = 3) %>%
       mutate(
         Rank                 = row_number(),
-        `Quality (0\u2013100)` = quality,
+        `Quality (0-100)` = quality,
         `P(Ace)`             = round(p_ace, 3),
         `P(FBK | In Play)`   = round(p_fbk, 3)
       ) %>%
       select(Rank,
              `Cal Poly Server` = player,
              `Target Receiver` = receiver,
-             `Quality (0\u2013100)`,
+             `Quality (0-100)`,
              `P(Ace)`,
              `P(FBK | In Play)`)
   })

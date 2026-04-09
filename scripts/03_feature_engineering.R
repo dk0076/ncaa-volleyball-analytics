@@ -38,9 +38,11 @@ error_rallies <- pbp %>%
   mutate(is_error = 1L)
 
 # Build serve-level dataset
-# home_team and away_team are native pbp columns — no extra join needed
+# home_team and away_team are native pbp columns — no extra join needed.
+# Exclude rows where score is not a valid "away-home" string (e.g. "Media timeout"
+# rows that ncaavolleyballr tags with event == "Serve" but carry no score data).
 serves <- pbp %>%
-  filter(event == "Serve") %>%
+  filter(event == "Serve", grepl("^[0-9]+-[0-9]+$", score)) %>%
   left_join(ace_rallies,   by = c("contestid", "set", "rally")) %>%
   left_join(error_rallies, by = c("contestid", "set", "rally")) %>%
   left_join(fbk_rallies,   by = c("contestid", "set", "rally")) %>%
@@ -52,8 +54,8 @@ serves <- pbp %>%
     fbk_against    = as.integer(!is.na(fbk_team) & fbk_team != team),
     set_num        = as.integer(set),
     # Score string is always away-home (e.g. "2-3" = away 2, home 3)
-    score_away     = suppressWarnings(as.integer(trimws(sub("-.*", "", score)))),
-    score_home     = suppressWarnings(as.integer(trimws(sub(".*-", "", score)))),
+    score_away     = as.integer(trimws(sub("-.*", "", score))),
+    score_home     = as.integer(trimws(sub(".*-", "", score))),
     score_diff     = ifelse(team == home_team,
                             score_home - score_away,   # home server: positive = winning
                             score_away - score_home),  # away server: positive = winning
@@ -81,6 +83,16 @@ serves <- pbp %>%
     score_diff, is_home, is_late_set,
     match_serves_prior, match_aces_prior, match_errors_prior
   )
+
+# Verify score parsing produced no unexpected NAs.
+# as.integer() coercion failures (malformed score strings) surface here rather
+# than propagating silently into score_diff and is_late_set.
+score_na <- sum(is.na(serves$score_diff))
+if (score_na > 0) {
+  warning(score_na, " NAs in score_diff — inspect malformed score strings in PBP data.")
+} else {
+  cat("score_diff: 0 NAs\n")
+}
 
 glimpse(serves)
 cat("\nTotal serves:", nrow(serves))
